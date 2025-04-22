@@ -4,17 +4,29 @@ import { useState } from "react";
 import { signUp } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-export default function SignupForm() {
+interface SignupFormProps {
+  defaultRole?: "teacher" | "student";
+}
+
+export default function SignupForm({
+  defaultRole = "student",
+}: SignupFormProps) {
   const router = useRouter();
+  const supabase = createClientComponentClient();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState<"teacher" | "student">("student");
+  const [role, setRole] = useState<"teacher" | "student">(defaultRole);
+  const [teacherPassphrase, setTeacherPassphrase] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // 教師登録用のパスフレーズを環境変数から取得
+  const TEACHER_PASSPHRASE = process.env.NEXT_PUBLIC_TEACHER_PASSPHRASE;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,6 +34,19 @@ export default function SignupForm() {
     if (password !== confirmPassword) {
       setError("パスワードが一致しません。");
       return;
+    }
+
+    if (role === "teacher") {
+      if (!TEACHER_PASSPHRASE) {
+        setError(
+          "システムエラー：教師登録用パスフレーズが設定されていません。"
+        );
+        return;
+      }
+      if (teacherPassphrase !== TEACHER_PASSPHRASE) {
+        setError("教師登録用のパスフレーズが正しくありません。");
+        return;
+      }
     }
 
     setLoading(true);
@@ -172,6 +197,25 @@ export default function SignupForm() {
             </div>
           </div>
         </div>
+
+        {role === "teacher" && (
+          <div className="mb-6">
+            <label
+              htmlFor="teacherPassphrase"
+              className="block text-gray-700 text-sm font-bold mb-2"
+            >
+              教師登録用パスフレーズ
+            </label>
+            <input
+              type="password"
+              id="teacherPassphrase"
+              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              value={teacherPassphrase}
+              onChange={(e) => setTeacherPassphrase(e.target.value)}
+              required
+            />
+          </div>
+        )}
 
         <div className="flex items-center justify-between">
           <button
