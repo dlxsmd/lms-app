@@ -86,3 +86,25 @@ export interface Material {
   created_at: string;
   updated_at: string;
 }
+
+export type ActivityType =
+  | "submission"
+  | "grade_received"
+  | "feedback_received"
+  | "course_enrolled"
+  | "assignment_created";
+
+export interface Activity {
+  id: string;
+  user_id: string;
+  type: ActivityType;
+  content: {
+    course_id?: string;
+    course_title?: string;
+    assignment_id?: string;
+    assignment_title?: string;
+    grade?: number;
+    submission_id?: string;
+  };
+  created_at: string;
+}

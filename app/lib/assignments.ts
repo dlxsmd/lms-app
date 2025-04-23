@@ -149,11 +149,56 @@ export async function gradeSubmission(
       graded_at: new Date().toISOString(),
     })
     .eq("id", submissionId)
-    .select()
+    .select(
+      `
+      *,
+      assignments(
+        id,
+        title,
+        courses(
+          id,
+          title
+        )
+      )
+    `
+    )
     .single();
 
   if (error) {
     throw error;
+  }
+
+  // 採点結果のアクティビティを記録
+  try {
+    await supabase.from("activities").insert({
+      user_id: data.student_id,
+      type: "grade_received",
+      content: {
+        course_id: data.assignments.courses.id,
+        course_title: data.assignments.courses.title,
+        assignment_id: data.assignments.id,
+        assignment_title: data.assignments.title,
+        grade: grade,
+        submission_id: data.id,
+      },
+    });
+
+    // フィードバックがある場合は、フィードバックのアクティビティも記録
+    if (feedback) {
+      await supabase.from("activities").insert({
+        user_id: data.student_id,
+        type: "feedback_received",
+        content: {
+          course_id: data.assignments.courses.id,
+          course_title: data.assignments.courses.title,
+          assignment_id: data.assignments.id,
+          assignment_title: data.assignments.title,
+          submission_id: data.id,
+        },
+      });
+    }
+  } catch (activityError) {
+    console.error("アクティビティの記録に失敗しました:", activityError);
   }
 
   return data as Submission;
