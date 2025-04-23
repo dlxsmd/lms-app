@@ -36,6 +36,13 @@ const problemTypeLabels: Record<ProblemType, string> = {
 interface TestResult {
   message: string;
   passed: boolean;
+  details?: {
+    input: string;
+    expected: string;
+    actual: string;
+    testNumber: number;
+    totalTests: number;
+  };
 }
 
 interface SubmissionContent {
@@ -519,26 +526,115 @@ const executeCode = async (language: string, code: string, input: string) => {
   }
 };
 
-// TestResults コンポーネントを作成
-const TestResults = ({ results }: { results: TestResult[] }) => (
-  <div className="mt-6">
-    <h3 className="font-medium text-lg mb-2">テスト結果</h3>
-    <div className="bg-gray-50 p-4 rounded-md">
-      {results.map((result, index) => (
-        <div
-          key={index}
-          className={`mb-2 ${
-            result.passed ? "text-green-600" : "text-red-600"
-          }`}
-        >
-          {result.message}
-        </div>
-      ))}
-    </div>
-  </div>
-);
+// TestResults コンポーネントを更新
+const TestResults = ({ results }: { results: TestResult[] }) => {
+  if (!results || results.length === 0) {
+    return null;
+  }
 
-// gradeCodeSubmission 関数の戻り値の型を更新
+  const passedTests = results.filter((r) => r.passed).length;
+  const totalTests = results.length;
+
+  return (
+    <div className="mt-6">
+      <h3 className="font-medium text-lg mb-2">テスト結果</h3>
+      <div className="bg-gray-50 p-4 rounded-md space-y-4">
+        {results.map((result, index) => (
+          <div
+            key={index}
+            className={`p-4 rounded-md ${
+              result.passed
+                ? "bg-green-50 border border-green-200"
+                : "bg-red-50 border border-red-200"
+            }`}
+          >
+            <div className="flex items-start">
+              {result.passed ? (
+                <CheckCircleIcon className="h-5 w-5 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+              ) : (
+                <XCircleIcon className="h-5 w-5 text-red-500 mt-0.5 mr-2 flex-shrink-0" />
+              )}
+              <div className="flex-1">
+                <div
+                  className={`font-medium ${
+                    result.passed ? "text-green-700" : "text-red-700"
+                  }`}
+                >
+                  テストケース {result.details?.testNumber}/
+                  {result.details?.totalTests}
+                  {result.passed ? " - 成功" : " - 失敗"}
+                </div>
+                {result.details && (
+                  <div className="mt-2 space-y-2 text-sm">
+                    <div className="bg-white p-3 rounded border border-gray-200">
+                      <div className="font-medium text-gray-700 mb-1">
+                        入力:
+                      </div>
+                      <pre className="whitespace-pre-wrap font-mono text-gray-600 text-sm">
+                        {result.details.input}
+                      </pre>
+                    </div>
+                    <div className="bg-white p-3 rounded border border-gray-200">
+                      <div className="font-medium text-gray-700 mb-1">
+                        期待される出力:
+                      </div>
+                      <pre className="whitespace-pre-wrap font-mono text-gray-600 text-sm">
+                        {result.details.expected}
+                      </pre>
+                    </div>
+                    <div className="bg-white p-3 rounded border border-gray-200">
+                      <div className="font-medium text-gray-700 mb-1">
+                        実際の出力:
+                      </div>
+                      <pre className="whitespace-pre-wrap font-mono text-gray-600 text-sm">
+                        {result.details.actual}
+                      </pre>
+                    </div>
+                    {!result.passed && (
+                      <div className="text-red-600 mt-2">{result.message}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <div className="mt-4 p-4 bg-white rounded-md border border-gray-200">
+          <h4 className="font-medium text-gray-900 mb-2">テスト実行サマリー</h4>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-sm text-gray-500">合計テストケース</div>
+              <div className="text-lg font-medium">{totalTests}件</div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">成功</div>
+              <div className="text-lg font-medium text-green-600">
+                {passedTests}件
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">失敗</div>
+              <div className="text-lg font-medium text-red-600">
+                {totalTests - passedTests}件
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const normalizeOutput = (output: string): string => {
+  return output
+    .trim() // 前後の空白を削除
+    .replace(/\r\n/g, "\n") // 改行コードを統一
+    .replace(/\n+/g, "\n") // 連続する改行を1つに
+    .replace(/\s+/g, " ") // 連続する空白を1つに
+    .toLowerCase(); // 大文字小文字を区別しない
+};
+
 const gradeCodeSubmission = async (
   code: string,
   language: string,
@@ -546,56 +642,103 @@ const gradeCodeSubmission = async (
 ): Promise<{ grade: number; feedback: TestResult[] }> => {
   const results: TestResult[] = [];
   let passedTests = 0;
+  let currentTestNumber = 0;
 
   console.log("テストケースの実行を開始:", testCases);
 
-  for (const testCase of testCases) {
-    try {
-      const output = await executeCode(language, code, testCase.input);
-      const normalizedOutput = output.trim();
-      const normalizedExpected = testCase.expected.trim();
+  const progressElement = document.createElement("div");
+  progressElement.className =
+    "fixed bottom-4 right-4 bg-white p-4 rounded-lg shadow-lg border border-gray-200 z-50";
+  document.body.appendChild(progressElement);
 
-      console.log("テストケース実行結果:", {
-        input: testCase.input,
-        expected: normalizedExpected,
-        actual: normalizedOutput,
-      });
+  try {
+    for (const testCase of testCases) {
+      currentTestNumber++;
+      progressElement.innerHTML = `
+        <div class="flex items-center space-x-2">
+          <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500"></div>
+          <span class="text-sm text-gray-600">
+            テストケース ${currentTestNumber}/${testCases.length} を実行中...
+          </span>
+        </div>
+      `;
 
-      const passed = normalizedOutput === normalizedExpected;
-      if (passed) {
-        passedTests++;
-        results.push({
-          message: `✅ テストケース通過: 入力="${testCase.input}", 期待値="${testCase.expected}"`,
-          passed: true,
+      try {
+        const output = await executeCode(language, code, testCase.input);
+        const normalizedOutput = normalizeOutput(output);
+        const normalizedExpected = normalizeOutput(testCase.expected);
+
+        console.log("テストケース実行結果:", {
+          input: testCase.input,
+          expected: normalizedExpected,
+          actual: normalizedOutput,
         });
-      } else {
+
+        // 出力が期待値を含んでいるかチェック
+        const passed = normalizedOutput.includes(normalizedExpected);
+
+        if (passed) {
+          passedTests++;
+          results.push({
+            message: "テスト成功",
+            passed: true,
+            details: {
+              input: testCase.input,
+              expected: testCase.expected,
+              actual: output.trim(),
+              testNumber: currentTestNumber,
+              totalTests: testCases.length,
+            },
+          });
+        } else {
+          results.push({
+            message: `出力が期待値と一致しません。\n入力値: ${
+              testCase.input
+            }\n期待される出力: "${
+              testCase.expected
+            }"\n実際の出力: "${output.trim()}"`,
+            passed: false,
+            details: {
+              input: testCase.input,
+              expected: testCase.expected,
+              actual: output.trim(),
+              testNumber: currentTestNumber,
+              totalTests: testCases.length,
+            },
+          });
+        }
+      } catch (error: any) {
+        console.error("テストケース実行エラー:", error);
         results.push({
-          message: `❌ テストケース失敗: 入力="${testCase.input}", 期待値="${testCase.expected}", 実際の出力="${normalizedOutput}"`,
+          message: `実行エラー: ${error.message}`,
           passed: false,
+          details: {
+            input: testCase.input,
+            expected: testCase.expected,
+            actual: "エラーが発生しました",
+            testNumber: currentTestNumber,
+            totalTests: testCases.length,
+          },
         });
       }
-    } catch (error: any) {
-      console.error("テストケース実行エラー:", error);
-      results.push({
-        message: `❌ テストケース実行エラー: 入力="${testCase.input}" - ${error.message}`,
-        passed: false,
-      });
     }
+
+    const totalTests = testCases.length;
+    const grade = Math.round((passedTests / totalTests) * 100);
+
+    console.log("採点結果:", {
+      passedTests,
+      totalTests,
+      grade,
+    });
+
+    return {
+      grade,
+      feedback: results,
+    };
+  } finally {
+    document.body.removeChild(progressElement);
   }
-
-  const totalTests = testCases.length;
-  const grade = Math.round((passedTests / totalTests) * 100);
-
-  console.log("採点結果:", {
-    passedTests,
-    totalTests,
-    grade,
-  });
-
-  return {
-    grade,
-    feedback: results,
-  };
 };
 
 // 提出回数を取得する関数
@@ -914,19 +1057,29 @@ export default function AssignmentDetailsClient({
         ? `得点: ${grade}/${assignment?.points_possible || 0}点`
         : "採点結果は後ほど通知されます";
 
-    toast.custom(
-      (t) => (
-        <SuccessToast
-          t={t}
-          message={`課題が正常に提出されました！${message}`}
-        />
-      ),
-      {
-        duration: 5000,
-        position: "top-center",
-        id: "success-toast",
-      }
-    );
+    // 既存のトーストを全て削除
+    toast.dismiss();
+
+    // 新しいトーストを表示して完了を待機
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve();
+      }, 9000);
+
+      toast.custom(
+        (t) => (
+          <SuccessToast
+            t={t}
+            message={`課題が正常に提出されました！${message}`}
+          />
+        ),
+        {
+          duration: 4000,
+          position: "top-center",
+          id: "success-toast",
+        }
+      );
+    });
   };
 
   const showErrorToast = (message: string) => {
@@ -958,6 +1111,7 @@ export default function AssignmentDetailsClient({
         language: "python",
         test_results: [],
       };
+
       let finalGrade = null;
       switch (assignment.problem_type) {
         case "multiple_choice":
@@ -1011,9 +1165,13 @@ export default function AssignmentDetailsClient({
               test_results: feedback,
             };
 
+            // submissionContentを更新
+            setSubmissionContent(submissionData);
+
             console.log("自動採点完了:", {
               grade: finalGrade,
               feedback,
+              submissionData,
             });
           } else {
             submissionData = {
@@ -1114,16 +1272,7 @@ export default function AssignmentDetailsClient({
         .select()
         .single();
 
-      if (submissionError) {
-        console.error("提出エラー:", submissionError);
-        console.error("提出しようとしたデータ:", {
-          submission_content: submissionData,
-          grade: finalGrade,
-        });
-        throw new Error(
-          `提出に失敗しました: ${submissionError.message || "不明なエラー"}`
-        );
-      }
+      if (submissionError) throw submissionError;
 
       // アクティビティの記録
       await recordActivity(
@@ -1139,7 +1288,6 @@ export default function AssignmentDetailsClient({
         }
       );
 
-      // 採点結果のアクティビティを記録
       if (finalGrade !== null) {
         await recordActivity(
           supabase as SupabaseClient,
@@ -1156,13 +1304,18 @@ export default function AssignmentDetailsClient({
         );
       }
 
+      // 状態を更新
       setSubmitting(false);
       setSubmitted(true);
-      setSubmissionCount(submissionCount + 1);
+      setSubmissionCount((prev) => prev + 1);
       if (finalGrade !== null) {
         setCurrentGrade(finalGrade);
       }
-      showSuccessToast(finalGrade);
+
+      // トースト表示を待つ
+      await showSuccessToast(finalGrade);
+
+      // ページの更新
       router.refresh();
     } catch (error: any) {
       console.error("課題提出中にエラーが発生しました:", error);
