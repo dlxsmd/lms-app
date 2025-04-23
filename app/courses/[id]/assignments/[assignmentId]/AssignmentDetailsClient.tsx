@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
@@ -418,6 +418,77 @@ const executeCode = async (language: string, code: string, input: string) => {
   }
 };
 
+// 提出回数を取得する関数
+const getSubmissionCount = async (
+  assignmentId: string,
+  studentId: string,
+  supabase: any
+) => {
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("submission_number")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .order("submission_number", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error("提出回数取得エラー:", error);
+    return 0;
+  }
+
+  return data?.[0]?.submission_number || 0;
+};
+
+// 再提出が可能かどうかを判定する関数
+const canResubmit = (
+  assignment: Assignment,
+  submissionCount: number,
+  currentGrade?: number | null
+): boolean => {
+  // 100点を取得している場合は再提出不可
+  if (currentGrade === assignment.points_possible) return false;
+
+  // 再提出が許可されていない場合は不可
+  if (!assignment.allow_resubmission) return false;
+
+  // 最大試行回数に達している場合は不可
+  if (assignment.max_attempts && submissionCount >= assignment.max_attempts)
+    return false;
+
+  return true;
+};
+
+// 提出が可能かどうかを判定する関数
+const canSubmit = (
+  assignment: Assignment,
+  submissionCount: number,
+  isResubmission: boolean,
+  currentGrade?: number | null
+): boolean => {
+  if (isResubmission) {
+    return canResubmit(assignment, submissionCount, currentGrade);
+  }
+  return !assignment.max_attempts || submissionCount < assignment.max_attempts;
+};
+
+// 選択問題の採点を行う関数
+const calculateMultipleChoiceGrade = (
+  questions: any[],
+  selectedAnswers: Record<string, string>,
+  totalPoints: number
+): number => {
+  const correctAnswers = questions.reduce((count, question) => {
+    const selectedOption = question.options.find(
+      (opt: any) => opt.id === selectedAnswers[question.id]
+    );
+    return count + (selectedOption?.isCorrect ? 1 : 0);
+  }, 0);
+
+  const pointsPerQuestion = totalPoints / questions.length;
+  return Math.round(correctAnswers * pointsPerQuestion);
+};
+
 interface AssignmentDetailsClientProps {
   id: string;
   assignmentId: string;
@@ -443,6 +514,8 @@ export default function AssignmentDetailsClient({
   const [testInput, setTestInput] = useState("");
   const [testOutput, setTestOutput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [submissionCount, setSubmissionCount] = useState<number>(0);
+  const [currentGrade, setCurrentGrade] = useState<number | null>(null);
 
   const handleAnswerSelect = (questionId: string, optionId: string) => {
     setSelectedAnswers((prev) => ({
@@ -450,6 +523,18 @@ export default function AssignmentDetailsClient({
       [questionId]: optionId,
     }));
   };
+
+  // 提出回数を更新する関数
+  const updateSubmissionCount = useCallback(async () => {
+    if (currentUser) {
+      const count = await getSubmissionCount(
+        assignmentId,
+        currentUser.id,
+        supabase
+      );
+      setSubmissionCount(count);
+    }
+  }, [assignmentId, currentUser, supabase]);
 
   useEffect(() => {
     async function loadData() {
@@ -493,6 +578,7 @@ export default function AssignmentDetailsClient({
 
             if (submissionData) {
               setSubmitted(true);
+              setCurrentGrade(submissionData.grade);
               if (submissionData.submission_content) {
                 if (assignmentData.problem_type === "multiple_choice") {
                   setSelectedAnswers(
@@ -512,6 +598,9 @@ export default function AssignmentDetailsClient({
                 }
               }
             }
+
+            // 提出回数を取得
+            await updateSubmissionCount();
           }
         }
       } catch (error) {
@@ -524,46 +613,12 @@ export default function AssignmentDetailsClient({
     loadData();
   }, [assignmentId, supabase]);
 
-  // 提出状態が変更されたときに再度データを読み込む
+  // 提出状態が変更されたときに提出回数を更新
   useEffect(() => {
-    if (submitted && currentUser) {
-      const loadSubmission = async () => {
-        try {
-          const { data: submissionData } = await supabase
-            .from("submissions")
-            .select("*")
-            .eq("assignment_id", assignmentId)
-            .eq("student_id", currentUser.id)
-            .single();
-
-          if (submissionData?.submission_content) {
-            if (assignment?.problem_type === "multiple_choice") {
-              setSelectedAnswers(
-                submissionData.submission_content.answers || {}
-              );
-            } else if (assignment?.problem_type === "code") {
-              setCodeSubmission(submissionData.submission_content.code || "");
-              setSelectedLanguage(
-                submissionData.submission_content.language || "python"
-              );
-            } else {
-              setSubmissionText(submissionData.submission_content.text || "");
-            }
-          }
-        } catch (error) {
-          console.error("提出データの読み込みエラー:", error);
-        }
-      };
-
-      loadSubmission();
+    if (submitted) {
+      updateSubmissionCount();
     }
-  }, [
-    submitted,
-    currentUser,
-    assignmentId,
-    supabase,
-    assignment?.problem_type,
-  ]);
+  }, [submitted, updateSubmissionCount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -573,8 +628,17 @@ export default function AssignmentDetailsClient({
       return;
     }
 
+    // 提出可能かどうかをチェック
+    const isResubmission = submitted;
+    if (!canSubmit(assignment, submissionCount, isResubmission, currentGrade)) {
+      alert("提出回数の制限に達しています。これ以上提出できません。");
+      return;
+    }
+
     try {
       let submissionContent: any = {};
+      let grade: number | null = null;
+      let isAutoGraded = false;
 
       // 問題タイプに応じて提出内容を構築
       switch (assignment.problem_type) {
@@ -582,10 +646,18 @@ export default function AssignmentDetailsClient({
           submissionContent = {
             answers: selectedAnswers,
           };
+          // 選択問題の場合は自動採点
+          grade = calculateMultipleChoiceGrade(
+            assignment.content.questions,
+            selectedAnswers,
+            assignment.points_possible
+          );
+          isAutoGraded = true;
           break;
         case "code":
           submissionContent = {
             code: codeSubmission,
+            language: selectedLanguage,
           };
           break;
         case "file_upload":
@@ -609,40 +681,104 @@ export default function AssignmentDetailsClient({
           submissionContent = { text: submissionText };
       }
 
-      // 提出データの保存
-      const { error: submissionError } = await supabase
+      // 既存の提出を確認
+      const { data: existingSubmission } = await supabase
         .from("submissions")
-        .insert({
-          assignment_id: assignmentId,
-          student_id: currentUser.id,
-          submission_content: submissionContent,
-          submitted_at: new Date().toISOString(),
-        });
+        .select("id")
+        .eq("assignment_id", assignmentId)
+        .eq("student_id", currentUser.id)
+        .single();
 
-      if (submissionError) throw submissionError;
+      // 新しい提出回数を取得
+      const newSubmissionNumber = submissionCount + 1;
+
+      const submissionData = {
+        submission_content: submissionContent,
+        submitted_at: new Date().toISOString(),
+        grade: grade,
+        feedback: null,
+        graded_by: null, // 自動採点でもnullを設定
+        graded_at: isAutoGraded ? new Date().toISOString() : null,
+        submission_number: newSubmissionNumber,
+      };
+
+      if (existingSubmission) {
+        // 既存の提出を更新
+        const { error: updateError } = await supabase
+          .from("submissions")
+          .update(submissionData)
+          .eq("id", existingSubmission.id);
+
+        if (updateError) throw updateError;
+      } else {
+        // 新規提出
+        const { error: insertError } = await supabase
+          .from("submissions")
+          .insert({
+            ...submissionData,
+            assignment_id: assignmentId,
+            student_id: currentUser.id,
+          });
+
+        if (insertError) throw insertError;
+      }
 
       setSubmitted(true);
-      alert("課題が提出されました！");
-    } catch (error) {
+      setSubmissionCount(newSubmissionNumber);
+      setCurrentGrade(grade);
+      alert(
+        isAutoGraded
+          ? `課題が提出され、自動採点されました！\n得点: ${grade}/${assignment.points_possible}点`
+          : "課題が提出されました！\n教員による採点をお待ちください。"
+      );
+    } catch (error: any) {
       console.error("提出エラー:", error);
-      alert("課題の提出中にエラーが発生しました。");
+      alert(
+        `課題の提出中にエラーが発生しました: ${error.message || "不明なエラー"}`
+      );
     }
   };
 
   const handleTestRun = async () => {
     setIsRunning(true);
     try {
+      if (!codeSubmission.trim()) {
+        setTestOutput("エラー: コードが入力されていません。");
+        return;
+      }
+
       const output = await executeCode(
         selectedLanguage,
         codeSubmission,
         testInput
       );
+
+      if (!output) {
+        setTestOutput("エラー: 実行結果が空です。");
+        return;
+      }
+
       setTestOutput(output);
     } catch (error: any) {
-      setTestOutput(`エラー: ${error.message}`);
+      console.error("テスト実行エラー:", error);
+      setTestOutput(
+        `エラー: ${
+          error?.message || error?.toString() || "不明なエラーが発生しました"
+        }`
+      );
     } finally {
       setIsRunning(false);
     }
+  };
+
+  const handleResubmit = () => {
+    setSubmitted(false);
+    setSubmissionText("");
+    setSelectedAnswers({});
+    setFile(null);
+    setCodeSubmission("");
+    setTestInput("");
+    setTestOutput("");
   };
 
   if (loading) {
@@ -707,7 +843,30 @@ export default function AssignmentDetailsClient({
             </div>
 
             <div className="border-t border-gray-200 pt-6">
-              <h2 className="text-xl font-semibold mb-4">課題内容</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">課題内容</h2>
+                <div className="text-sm text-gray-600">
+                  {assignment.max_attempts ? (
+                    <div
+                      className={`${
+                        submissionCount >= assignment.max_attempts
+                          ? "text-red-600 font-semibold"
+                          : ""
+                      }`}
+                    >
+                      提出回数: {submissionCount} / {assignment.max_attempts}
+                      {submissionCount >= assignment.max_attempts && (
+                        <span className="ml-2">（制限到達）</span>
+                      )}
+                    </div>
+                  ) : (
+                    assignment.allow_resubmission && (
+                      <div>提出回数: {submissionCount} / 無制限</div>
+                    )
+                  )}
+                </div>
+              </div>
+
               <AssignmentContent
                 assignment={assignment}
                 submitted={submitted}
@@ -764,14 +923,65 @@ export default function AssignmentDetailsClient({
 
                   <button
                     type="submit"
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors"
+                    className={`bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors ${
+                      !canSubmit(
+                        assignment,
+                        submissionCount,
+                        false,
+                        currentGrade
+                      )
+                        ? "opacity-50 cursor-not-allowed"
+                        : ""
+                    }`}
+                    disabled={
+                      !canSubmit(
+                        assignment,
+                        submissionCount,
+                        false,
+                        currentGrade
+                      )
+                    }
                   >
                     課題を提出
                   </button>
                 </form>
               ) : (
-                <div className="mt-6 bg-green-50 border border-green-200 rounded-md p-4">
-                  <p className="text-green-800">この課題は既に提出済みです。</p>
+                <div className="mt-6">
+                  <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
+                    <p className="text-green-800">この課題は提出済みです。</p>
+                    {currentGrade !== null && (
+                      <p className="text-gray-600 mt-2">
+                        現在の得点: {currentGrade} /{" "}
+                        {assignment.points_possible}点
+                      </p>
+                    )}
+                    {canResubmit(assignment, submissionCount, currentGrade) ? (
+                      <button
+                        onClick={handleResubmit}
+                        className="mt-2 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
+                      >
+                        再提出する
+                      </button>
+                    ) : (
+                      <>
+                        {currentGrade === assignment.points_possible ? (
+                          <p className="mt-2 text-green-600">
+                            満点を獲得しているため、再提出は不要です。
+                          </p>
+                        ) : assignment.max_attempts &&
+                          submissionCount >= assignment.max_attempts ? (
+                          <p className="mt-2 text-red-600">
+                            提出回数の制限（{assignment.max_attempts}
+                            回）に達しています。
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-gray-600">
+                            この課題は再提出できません。
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

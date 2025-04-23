@@ -12,6 +12,8 @@ interface EnrolledCourse {
 interface Submission {
   id: string;
   student_id: string;
+  grade: number | null;
+  submission_number: number;
 }
 
 interface AssignmentWithSubmissions extends Assignment {
@@ -27,7 +29,12 @@ interface AssignmentDisplay extends Assignment {
     id: string;
     title: string;
   };
+  current_grade: number | null;
+  submission_number: number;
 }
+
+// 定数定義
+const MAX_DISPLAYED_ASSIGNMENTS = 5; // 表示する最大課題数
 
 export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>([]);
@@ -85,25 +92,26 @@ export default function DashboardPage() {
         const nextWeek = new Date();
         nextWeek.setDate(today.getDate() + 7);
 
-        const { data: upcomingAssignmentsData, error: assignmentsError } =
+        // 課題とその提出状況を取得
+        const { data: assignmentsData, error: assignmentsError } =
           await supabase
             .from("assignments")
             .select(
               `
-              *,
-              courses!inner(
-                id,
-                title
-              ),
-              submissions!left(
-                id,
-                student_id
-              )
-            `
+            *,
+            courses!inner(
+              id,
+              title
+            ),
+            submissions!left(
+              id,
+              student_id,
+              grade,
+              submission_number
             )
-            .gte("due_date", today.toISOString())
-            .lte("due_date", nextWeek.toISOString())
-            .order("due_date", { ascending: true });
+          `
+            )
+            .gte("due_date", new Date().toISOString());
 
         if (assignmentsError) {
           console.error(
@@ -113,27 +121,53 @@ export default function DashboardPage() {
           throw assignmentsError;
         }
 
-        // 未提出の課題のみをフィルタリング
+        // 未提出の課題と再提出可能な課題をフィルタリング
         const assignments =
-          upcomingAssignmentsData
-            ?.filter(
-              (assignment: AssignmentWithSubmissions) =>
-                !assignment.submissions?.some(
-                  (submission: Submission) => submission.student_id === user.id
-                )
-            )
-            .map(
-              (assignment: AssignmentWithSubmissions): AssignmentDisplay => ({
+          assignmentsData
+            ?.filter((assignment: AssignmentWithSubmissions) => {
+              const submission = assignment.submissions?.find(
+                (sub: any) => sub.student_id === user.id
+              );
+
+              // 未提出の課題
+              if (!submission) {
+                return true;
+              }
+
+              // 再提出可能な課題（満点でない場合）
+              if (
+                assignment.allow_resubmission &&
+                submission.grade !== assignment.points_possible &&
+                (!assignment.max_attempts ||
+                  submission.submission_number < assignment.max_attempts)
+              ) {
+                return true;
+              }
+
+              return false;
+            })
+            .map((assignment: AssignmentWithSubmissions): AssignmentDisplay => {
+              const submission = assignment.submissions?.find(
+                (sub: any) => sub.student_id === user.id
+              );
+              return {
                 ...assignment,
                 course: {
                   id: assignment.courses.id,
                   title: assignment.courses.title,
                 },
-              })
-            ) || [];
+                current_grade: submission?.grade ?? null,
+                submission_number: submission?.submission_number || 0,
+              };
+            })
+            .sort(
+              (a, b) =>
+                new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+            )
+            .slice(0, MAX_DISPLAYED_ASSIGNMENTS) || [];
 
         console.log(
-          "📊 Dashboard: Found unsubmitted assignments:",
+          "📊 Dashboard: Found assignments to work on:",
           assignments.length
         );
 
@@ -206,35 +240,87 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 締め切りが近い課題 */}
+        {/* 締め切りが近い課題と再提出可能な課題 */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4">締め切りが近い課題</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">取り組むべき課題</h2>
+            {assignments.length === MAX_DISPLAYED_ASSIGNMENTS && (
+              <span className="text-sm text-gray-500">
+                ※ 締切が近い{MAX_DISPLAYED_ASSIGNMENTS}件を表示中
+              </span>
+            )}
+          </div>
 
           {assignments.length > 0 ? (
             <div className="space-y-4">
-              {assignments.map((assignment) => (
-                <Link
-                  key={assignment.id}
-                  href={`/courses/${assignment.course_id}/assignments/${assignment.id}`}
-                  className="block p-4 border rounded-md hover:bg-gray-50"
-                >
-                  <h3 className="font-medium">{assignment.title}</h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    コース: {assignment.course.title}
-                  </p>
-                  <div className="flex justify-between mt-2 text-xs text-gray-500">
-                    <span>
-                      締め切り:{" "}
-                      {new Date(assignment.due_date).toLocaleDateString()}
-                    </span>
-                    <span>配点: {assignment.points_possible}点</span>
-                  </div>
-                </Link>
-              ))}
+              {assignments.map((assignment) => {
+                const isSubmitted = assignment.submission_number > 0;
+                const dueDate = new Date(assignment.due_date);
+                const today = new Date();
+                const daysUntilDue = Math.ceil(
+                  (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+                );
+
+                return (
+                  <Link
+                    key={assignment.id}
+                    href={`/courses/${assignment.course_id}/assignments/${assignment.id}`}
+                    className="block p-4 border rounded-md hover:bg-gray-50"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-medium">{assignment.title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                          コース: {assignment.course.title}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        {isSubmitted && (
+                          <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-md">
+                            再提出可能
+                          </span>
+                        )}
+                        <span
+                          className={`text-xs rounded-md px-2 py-1 ${
+                            daysUntilDue <= 1
+                              ? "bg-red-100 text-red-800"
+                              : daysUntilDue <= 3
+                              ? "bg-orange-100 text-orange-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {daysUntilDue <= 0
+                            ? "今日が締切"
+                            : `締切まで${daysUntilDue}日`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {isSubmitted && (
+                        <p className="text-sm text-gray-600">
+                          現在の得点: {assignment.current_grade} /{" "}
+                          {assignment.points_possible}点
+                        </p>
+                      )}
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>
+                          締め切り:{" "}
+                          {new Date(assignment.due_date).toLocaleDateString()}
+                        </span>
+                        <span>
+                          {assignment.max_attempts
+                            ? `提出回数: ${assignment.submission_number} / ${assignment.max_attempts}`
+                            : "提出回数制限なし"}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           ) : (
             <p className="text-center text-gray-500 py-4">
-              今週締め切りの課題はありません
+              現在取り組むべき課題はありません
             </p>
           )}
         </div>

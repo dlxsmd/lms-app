@@ -48,18 +48,30 @@ export interface Assignment {
   points_possible: number;
   created_at: string;
   updated_at: string;
+  allow_resubmission: boolean;
+  max_attempts?: number;
 }
 
 export interface Submission {
   id: string;
   assignment_id: string;
   student_id: string;
-  submission_content: any;
   submitted_at: string;
-  grade?: number;
-  feedback?: string;
-  graded_by?: string;
-  graded_at?: string;
+  submission_content: any;
+  grade: number | null;
+  feedback: string | null;
+  graded_by: string | null;
+  graded_at: string | null;
+  submission_number: number;
+}
+
+export interface AssignmentDisplay extends Assignment {
+  course: {
+    id: string;
+    title: string;
+  };
+  current_grade?: number | null;
+  submission_number: number;
 }
 
 export type MaterialType = "document" | "video" | "link" | "other";
