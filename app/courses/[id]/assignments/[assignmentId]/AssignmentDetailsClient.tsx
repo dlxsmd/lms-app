@@ -346,17 +346,12 @@ const AssignmentContent = ({
 };
 
 // レート制限用のユーティリティ関数を追加
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const executeCode = async (language: string, code: string, input: string) => {
-  const JUDGE0_API = "https://judge0-ce.p.rapidapi.com";
-  const RAPIDAPI_KEY = process.env.NEXT_PUBLIC_RAPIDAPI_KEY;
+  const JUDGE0_API = "http://34.146.230.116:2358";
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 2000; // 2秒待機
-
-  if (!RAPIDAPI_KEY) {
-    throw new Error("RapidAPI キーが設定されていません");
-  }
 
   const languageIds: Record<string, number> = {
     python: 71,
@@ -396,8 +391,6 @@ const executeCode = async (language: string, code: string, input: string) => {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            "X-RapidAPI-Key": RAPIDAPI_KEY,
-            "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
           },
           body: JSON.stringify({
             language_id: languageIds[language],
@@ -409,11 +402,17 @@ const executeCode = async (language: string, code: string, input: string) => {
 
       if (response.status === 429) {
         if (retryCount < MAX_RETRIES) {
-          console.log(`レート制限に達しました。${RETRY_DELAY/1000}秒後にリトライします... (${retryCount + 1}/${MAX_RETRIES})`);
+          console.log(
+            `レート制限に達しました。${
+              RETRY_DELAY / 1000
+            }秒後にリトライします... (${retryCount + 1}/${MAX_RETRIES})`
+          );
           await wait(RETRY_DELAY);
           return makeRequest(retryCount + 1);
         }
-        throw new Error("APIのレート制限に達しました。しばらく待ってから再試行してください。");
+        throw new Error(
+          "APIのレート制限に達しました。しばらく待ってから再試行してください。"
+        );
       }
 
       if (!response.ok) {
@@ -437,8 +436,7 @@ const executeCode = async (language: string, code: string, input: string) => {
           `${JUDGE0_API}/submissions/${token}?base64_encoded=true`,
           {
             headers: {
-              "X-RapidAPI-Key": RAPIDAPI_KEY,
-              "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+              "content-type": "application/json",
             },
           }
         );
@@ -450,7 +448,9 @@ const executeCode = async (language: string, code: string, input: string) => {
         }
 
         if (!resultResponse.ok) {
-          throw new Error(`結果取得エラー: ${resultResponse.status} ${resultResponse.statusText}`);
+          throw new Error(
+            `結果取得エラー: ${resultResponse.status} ${resultResponse.statusText}`
+          );
         }
 
         try {
@@ -497,10 +497,13 @@ const executeCode = async (language: string, code: string, input: string) => {
       const output = decodeBase64(result.stdout);
       console.log("実行結果:", output);
       return output || "出力なし";
-
     } catch (error: any) {
       if (error.message.includes("レート制限") && retryCount < MAX_RETRIES) {
-        console.log(`エラーが発生しました。リトライします... (${retryCount + 1}/${MAX_RETRIES})`);
+        console.log(
+          `エラーが発生しました。リトライします... (${
+            retryCount + 1
+          }/${MAX_RETRIES})`
+        );
         await wait(RETRY_DELAY);
         return makeRequest(retryCount + 1);
       }
