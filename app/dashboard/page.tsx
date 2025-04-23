@@ -47,28 +47,23 @@ export default function DashboardPage() {
 
         // 受講中のコースを取得
         console.log("📚 Dashboard: Fetching enrolled courses...");
-        const { data: enrolledCoursesData, error: coursesError } =
-          await supabase
-            .from("course_enrollments")
-            .select("course:courses(*)")
-            .eq("student_id", user.id);
+        const { data: coursesData, error: coursesError } = await supabase
+          .from("courses")
+          .select("*");
 
         if (coursesError) {
           console.error("❌ Dashboard: Course fetch error:", coursesError);
           throw coursesError;
         }
-        if (!enrolledCoursesData) {
+        if (!coursesData) {
           console.log("ℹ️ Dashboard: No enrolled courses found");
           return;
         }
 
-        console.log("📊 Dashboard: Found courses:", enrolledCoursesData.length);
+        console.log("📊 Dashboard: Found courses:", coursesData.length);
 
-        const enrolledCourses =
-          enrolledCoursesData as unknown as EnrolledCourse[];
-        const courseIds = enrolledCourses.map(
-          (enrollment) => enrollment.course.id
-        );
+        const courses = coursesData as Course[];
+        const courseIds = courses.map((course) => course.id);
 
         // 締め切りが近い課題を取得
         console.log("📝 Dashboard: Fetching upcoming assignments...");
@@ -81,11 +76,13 @@ export default function DashboardPage() {
             .from("assignments")
             .select(
               `
-            *,
-            course:courses(title)
-          `
+              *,
+              courses!inner(
+                id,
+                title
+              )
+            `
             )
-            .in("course_id", courseIds)
             .gte("due_date", today.toISOString())
             .lte("due_date", nextWeek.toISOString())
             .order("due_date", { ascending: true })
@@ -98,20 +95,18 @@ export default function DashboardPage() {
           );
           throw assignmentsError;
         }
-        if (!upcomingAssignmentsData) {
-          console.log("ℹ️ Dashboard: No upcoming assignments found");
-          return;
-        }
 
-        console.log(
-          "📊 Dashboard: Found assignments:",
-          upcomingAssignmentsData.length
-        );
+        const assignments =
+          upcomingAssignmentsData?.map((assignment) => ({
+            ...assignment,
+            course: {
+              id: assignment.courses.id,
+              title: assignment.courses.title,
+            },
+          })) || [];
 
-        setCourses(enrolledCourses.map((enrollment) => enrollment.course));
-        setAssignments(
-          upcomingAssignmentsData as unknown as AssignmentWithCourse[]
-        );
+        setCourses(courses);
+        setAssignments(assignments as AssignmentWithCourse[]);
       } catch (error) {
         console.error("❌ Dashboard: Error fetching dashboard data:", error);
       } finally {
@@ -124,7 +119,20 @@ export default function DashboardPage() {
   }, [supabase]);
 
   if (loading) {
-    return <div className="container mx-auto py-8 px-4">読み込み中...</div>;
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="relative">
+            <div className="w-12 h-12 border-4 border-indigo-200 rounded-full animate-spin"></div>
+            <div className="w-12 h-12 border-t-4 border-indigo-600 rounded-full animate-spin absolute top-0 left-0"></div>
+          </div>
+          <p className="mt-4 text-gray-600 font-medium">読み込み中...</p>
+          <p className="mt-2 text-sm text-gray-500">
+            コンテンツを準備しています
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

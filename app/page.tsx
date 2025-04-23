@@ -121,7 +121,7 @@ export default function Home() {
                       href="/auth/signup?role=teacher"
                       className="mt-8 inline-block px-6 py-3 text-lg font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
                     >
-                      講師として登録
+                      教師として登録
                     </Link>
                   </p>
                 </dd>
@@ -157,7 +157,7 @@ export default function Home() {
                       href="/auth/signup?role=student"
                       className="mt-8 inline-block px-6 py-3 text-lg font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
                     >
-                      生徒として登録
+                      学生として登録
                     </Link>
                   </p>
                 </dd>

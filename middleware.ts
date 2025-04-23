@@ -26,6 +26,11 @@ export async function middleware(request: NextRequest) {
       console.error("❌ Middleware: Session error:", error);
     }
 
+    // サインアップページへのアクセスは常に許可
+    if (request.nextUrl.pathname === "/auth/signup") {
+      return res;
+    }
+
     // 保護されたルートへのアクセスをチェック
     if (!session && request.nextUrl.pathname.startsWith("/dashboard")) {
       console.log(
@@ -38,12 +43,8 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    // ログイン済みユーザーがログインページやサインアップページにアクセスした場合
-    if (
-      session &&
-      (request.nextUrl.pathname === "/auth/login" ||
-        request.nextUrl.pathname === "/auth/signup")
-    ) {
+    // ログイン済みユーザーがログインページにアクセスした場合
+    if (session && request.nextUrl.pathname === "/auth/login") {
       console.log(
         "ℹ️ Middleware: Logged-in user accessing auth pages, redirecting to dashboard"
       );
