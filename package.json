@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.49.4",
     "@uiw/react-textarea-code-editor": "^3.1.0",
     "date-fns": "^4.1.0",
+    "heic2any": "^0.0.4",
     "next": "^15.3.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
