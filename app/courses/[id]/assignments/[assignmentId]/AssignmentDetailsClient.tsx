@@ -33,6 +33,20 @@ const problemTypeLabels: Record<ProblemType, string> = {
   code: "コーディング課題",
 };
 
+interface TestResult {
+  message: string;
+  passed: boolean;
+}
+
+interface SubmissionContent {
+  selected_answers?: Record<string, string>;
+  code?: string;
+  text?: string;
+  file_url?: string;
+  language?: string;
+  test_results?: TestResult[];
+}
+
 // 課題コンテンツ表示コンポーネント
 const AssignmentContent = ({
   assignment,
@@ -48,6 +62,7 @@ const AssignmentContent = ({
   testOutput,
   handleTestRun,
   isRunning,
+  submissionContent,
 }: {
   assignment: Assignment;
   submitted: boolean;
@@ -62,6 +77,7 @@ const AssignmentContent = ({
   testOutput: string;
   handleTestRun: () => void;
   isRunning: boolean;
+  submissionContent?: SubmissionContent;
 }) => {
   switch (assignment.problem_type) {
     case "multiple_choice":
@@ -317,6 +333,10 @@ const AssignmentContent = ({
               />
             </div>
           )}
+
+          {submitted && submissionContent?.test_results && (
+            <TestResults results={submissionContent.test_results} />
+          )}
         </div>
       );
 
@@ -325,101 +345,254 @@ const AssignmentContent = ({
   }
 };
 
-// コード実行用のヘルパー関数
+// レート制限用のユーティリティ関数を追加
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const executeCode = async (language: string, code: string, input: string) => {
   const JUDGE0_API = "https://judge0-ce.p.rapidapi.com";
   const RAPIDAPI_KEY = process.env.NEXT_PUBLIC_RAPIDAPI_KEY;
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000; // 2秒待機
+
+  if (!RAPIDAPI_KEY) {
+    throw new Error("RapidAPI キーが設定されていません");
+  }
 
   const languageIds: Record<string, number> = {
-    python: 71, // Python 3
-    javascript: 63, // JavaScript Node.js
-    java: 62, // Java
-    cpp: 54, // C++
-    c: 50, // C
-    csharp: 51, // C#
-    ruby: 72, // Ruby
-    php: 68, // PHP
-    swift: 83, // Swift
-    rust: 73, // Rust
-    go: 60, // Go
-    kotlin: 78, // Kotlin
+    python: 71,
+    javascript: 63,
+    java: 62,
+    cpp: 54,
+    c: 50,
+    csharp: 51,
+    ruby: 72,
+    php: 68,
+    swift: 83,
+    rust: 73,
+    go: 60,
+    kotlin: 78,
   };
 
   if (!languageIds[language]) {
     throw new Error("未対応の言語です");
   }
 
-  try {
-    // Base64エンコード
-    const base64Code = btoa(unescape(encodeURIComponent(code)));
-    const base64Input = btoa(unescape(encodeURIComponent(input)));
+  const makeRequest = async (retryCount: number = 0): Promise<any> => {
+    try {
+      // Base64エンコード
+      const base64Code = btoa(unescape(encodeURIComponent(code)));
+      const base64Input = btoa(unescape(encodeURIComponent(input)));
 
-    // トークンの取得
-    const response = await fetch(
-      `${JUDGE0_API}/submissions?base64_encoded=true`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-RapidAPI-Key": RAPIDAPI_KEY || "",
-          "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
-        },
-        body: JSON.stringify({
-          language_id: languageIds[language],
-          source_code: base64Code,
-          stdin: base64Input,
-        }),
-      }
-    );
+      console.log("コード実行リクエスト:", {
+        language_id: languageIds[language],
+        source_code: base64Code,
+        stdin: base64Input,
+      });
 
-    const { token } = await response.json();
-
-    // 結果の取得（ポーリング）
-    let result;
-    for (let i = 0; i < 10; i++) {
-      const resultResponse = await fetch(
-        `${JUDGE0_API}/submissions/${token}?base64_encoded=true`,
+      // トークンの取得
+      const response = await fetch(
+        `${JUDGE0_API}/submissions?base64_encoded=true`,
         {
+          method: "POST",
           headers: {
-            "X-RapidAPI-Key": RAPIDAPI_KEY || "",
+            "content-type": "application/json",
+            "X-RapidAPI-Key": RAPIDAPI_KEY,
             "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
           },
+          body: JSON.stringify({
+            language_id: languageIds[language],
+            source_code: base64Code,
+            stdin: base64Input,
+          }),
         }
       );
 
-      result = await resultResponse.json();
-
-      if (result.status?.id > 2) {
-        break;
+      if (response.status === 429) {
+        if (retryCount < MAX_RETRIES) {
+          console.log(`レート制限に達しました。${RETRY_DELAY/1000}秒後にリトライします... (${retryCount + 1}/${MAX_RETRIES})`);
+          await wait(RETRY_DELAY);
+          return makeRequest(retryCount + 1);
+        }
+        throw new Error("APIのレート制限に達しました。しばらく待ってから再試行してください。");
       }
 
-      // 1秒待機
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    // Base64デコード
-    const decodeBase64 = (str: string | null) => {
-      if (!str) return null;
-      try {
-        return decodeURIComponent(escape(atob(str)));
-      } catch (e) {
-        return str;
+      if (!response.ok) {
+        throw new Error(`APIエラー: ${response.status} ${response.statusText}`);
       }
-    };
 
-    if (result.compile_output) {
-      return `コンパイルエラー:\n${decodeBase64(result.compile_output)}`;
+      const submissionData = await response.json();
+      if (!submissionData || !submissionData.token) {
+        throw new Error("トークンの取得に失敗しました");
+      }
+
+      const { token } = submissionData;
+      console.log("取得したトークン:", token);
+
+      // 結果の取得（ポーリング）
+      let result;
+      for (let i = 0; i < 10; i++) {
+        await wait(1000); // ポーリング間隔を1秒に設定
+
+        const resultResponse = await fetch(
+          `${JUDGE0_API}/submissions/${token}?base64_encoded=true`,
+          {
+            headers: {
+              "X-RapidAPI-Key": RAPIDAPI_KEY,
+              "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+            },
+          }
+        );
+
+        if (resultResponse.status === 429) {
+          console.log("結果取得時にレート制限に達しました。待機中...");
+          await wait(RETRY_DELAY);
+          continue;
+        }
+
+        if (!resultResponse.ok) {
+          throw new Error(`結果取得エラー: ${resultResponse.status} ${resultResponse.statusText}`);
+        }
+
+        try {
+          result = await resultResponse.json();
+        } catch (e) {
+          console.error("JSON解析エラー:", e);
+          throw new Error("実行結果の解析に失敗しました");
+        }
+
+        if (!result) {
+          throw new Error("実行結果が空です");
+        }
+
+        console.log("実行状態:", result.status);
+
+        if (result.status?.id > 2) {
+          break;
+        }
+      }
+
+      // Base64デコード
+      const decodeBase64 = (str: string | null) => {
+        if (!str) return null;
+        try {
+          return decodeURIComponent(escape(atob(str)));
+        } catch (e) {
+          console.error("Base64デコードエラー:", e);
+          return str;
+        }
+      };
+
+      if (result.compile_output) {
+        const compilationError = decodeBase64(result.compile_output);
+        console.log("コンパイルエラー:", compilationError);
+        return `コンパイルエラー:\n${compilationError}`;
+      }
+
+      if (result.stderr) {
+        const runtimeError = decodeBase64(result.stderr);
+        console.log("実行時エラー:", runtimeError);
+        return `実行エラー:\n${runtimeError}`;
+      }
+
+      const output = decodeBase64(result.stdout);
+      console.log("実行結果:", output);
+      return output || "出力なし";
+
+    } catch (error: any) {
+      if (error.message.includes("レート制限") && retryCount < MAX_RETRIES) {
+        console.log(`エラーが発生しました。リトライします... (${retryCount + 1}/${MAX_RETRIES})`);
+        await wait(RETRY_DELAY);
+        return makeRequest(retryCount + 1);
+      }
+      throw error;
     }
+  };
 
-    if (result.stderr) {
-      return `実行エラー:\n${decodeBase64(result.stderr)}`;
-    }
-
-    return decodeBase64(result.stdout) || "出力なし";
+  try {
+    return await makeRequest();
   } catch (error: any) {
     console.error("コード実行エラー:", error);
-    return `エラー: ${error.message}`;
+    return `エラー: ${error.message || "不明なエラーが発生しました"}`;
   }
+};
+
+// TestResults コンポーネントを作成
+const TestResults = ({ results }: { results: TestResult[] }) => (
+  <div className="mt-6">
+    <h3 className="font-medium text-lg mb-2">テスト結果</h3>
+    <div className="bg-gray-50 p-4 rounded-md">
+      {results.map((result, index) => (
+        <div
+          key={index}
+          className={`mb-2 ${
+            result.passed ? "text-green-600" : "text-red-600"
+          }`}
+        >
+          {result.message}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// gradeCodeSubmission 関数の戻り値の型を更新
+const gradeCodeSubmission = async (
+  code: string,
+  language: string,
+  testCases: { input: string; expected: string }[]
+): Promise<{ grade: number; feedback: TestResult[] }> => {
+  const results: TestResult[] = [];
+  let passedTests = 0;
+
+  console.log("テストケースの実行を開始:", testCases);
+
+  for (const testCase of testCases) {
+    try {
+      const output = await executeCode(language, code, testCase.input);
+      const normalizedOutput = output.trim();
+      const normalizedExpected = testCase.expected.trim();
+
+      console.log("テストケース実行結果:", {
+        input: testCase.input,
+        expected: normalizedExpected,
+        actual: normalizedOutput,
+      });
+
+      const passed = normalizedOutput === normalizedExpected;
+      if (passed) {
+        passedTests++;
+        results.push({
+          message: `✅ テストケース通過: 入力="${testCase.input}", 期待値="${testCase.expected}"`,
+          passed: true,
+        });
+      } else {
+        results.push({
+          message: `❌ テストケース失敗: 入力="${testCase.input}", 期待値="${testCase.expected}", 実際の出力="${normalizedOutput}"`,
+          passed: false,
+        });
+      }
+    } catch (error: any) {
+      console.error("テストケース実行エラー:", error);
+      results.push({
+        message: `❌ テストケース実行エラー: 入力="${testCase.input}" - ${error.message}`,
+        passed: false,
+      });
+    }
+  }
+
+  const totalTests = testCases.length;
+  const grade = Math.round((passedTests / totalTests) * 100);
+
+  console.log("採点結果:", {
+    passedTests,
+    totalTests,
+    grade,
+  });
+
+  return {
+    grade,
+    feedback: results,
+  };
 };
 
 // 提出回数を取得する関数
@@ -505,14 +678,6 @@ const calculateMultipleChoiceGrade = (
 
   return grade;
 };
-
-interface SubmissionContent {
-  selected_answers?: Record<string, string>;
-  code?: string;
-  text?: string;
-  file_url?: string;
-  language?: string;
-}
 
 interface AssignmentDetailsClientProps {
   id: string;
@@ -612,6 +777,16 @@ export default function AssignmentDetailsClient({
   const [currentGrade, setCurrentGrade] = useState<number | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submissionContent, setSubmissionContent] = useState<SubmissionContent>(
+    {
+      selected_answers: {},
+      code: "",
+      text: "",
+      file_url: "",
+      language: "python",
+      test_results: [],
+    }
+  );
 
   // 言語が変更されたときのテンプレートコードの設定
   useEffect(() => {
@@ -772,7 +947,14 @@ export default function AssignmentDetailsClient({
         throw new Error("ユーザーまたはコース情報が取得できません");
       }
 
-      let submissionContent: SubmissionContent = {};
+      let submissionData: SubmissionContent = {
+        selected_answers: {},
+        code: "",
+        text: "",
+        file_url: "",
+        language: "python",
+        test_results: [],
+      };
       let finalGrade = null;
       switch (assignment.problem_type) {
         case "multiple_choice":
@@ -792,22 +974,10 @@ export default function AssignmentDetailsClient({
             throw new Error("すべての問題に回答してください");
           }
 
-          // 選択された回答をオブジェクトとして保存
-          submissionContent = {
-            selected_answers: selectedAnswers, // {questionId: selectedOptionId}の形式で保存
+          submissionData = {
+            ...submissionData,
+            selected_answers: selectedAnswers,
           };
-
-          console.log("保存する回答データ:", submissionContent);
-
-          // 自動採点
-          if (assignment.content.questions) {
-            finalGrade = calculateMultipleChoiceGrade(
-              selectedAnswers,
-              assignment.content.questions,
-              assignment.points_possible
-            );
-            console.log("計算された最終得点:", finalGrade);
-          }
           break;
         case "code":
           const trimmedCode = codeSubmission.trim();
@@ -821,10 +991,34 @@ export default function AssignmentDetailsClient({
             );
             throw new Error("テンプレートコードがそのまま提出されています");
           }
-          submissionContent = {
-            code: codeSubmission,
-            language: selectedLanguage,
-          };
+
+          if (assignment.content.test_cases) {
+            console.log("自動採点を開始します");
+            const { grade, feedback } = await gradeCodeSubmission(
+              trimmedCode,
+              selectedLanguage,
+              assignment.content.test_cases
+            );
+
+            finalGrade = grade;
+            submissionData = {
+              ...submissionData,
+              code: trimmedCode,
+              language: selectedLanguage,
+              test_results: feedback,
+            };
+
+            console.log("自動採点完了:", {
+              grade: finalGrade,
+              feedback,
+            });
+          } else {
+            submissionData = {
+              ...submissionData,
+              code: trimmedCode,
+              language: selectedLanguage,
+            };
+          }
           break;
         case "file_upload":
           if (!file) {
@@ -859,7 +1053,8 @@ export default function AssignmentDetailsClient({
             data: { publicUrl },
           } = supabase.storage.from("assignments").getPublicUrl(filePath);
 
-          submissionContent = {
+          submissionData = {
+            ...submissionData,
             file_url: publicUrl,
           };
           break;
@@ -873,7 +1068,8 @@ export default function AssignmentDetailsClient({
             setError("回答が短すぎます。もう少し詳しく記述してください。");
             throw new Error("回答が短すぎます");
           }
-          submissionContent = {
+          submissionData = {
+            ...submissionData,
             text: submissionText,
           };
           break;
@@ -893,13 +1089,13 @@ export default function AssignmentDetailsClient({
       }
 
       // 提出処理
-      const { data: submissionData, error: submissionError } = await supabase
+      const { data: submission, error: submissionError } = await supabase
         .from("submissions")
         .upsert(
           {
             assignment_id: assignmentId,
             student_id: currentUser.id,
-            submission_content: submissionContent,
+            submission_content: submissionData,
             submitted_at: new Date().toISOString(),
             submission_number: submissionCount + 1,
             grade: finalGrade,
@@ -918,7 +1114,7 @@ export default function AssignmentDetailsClient({
       if (submissionError) {
         console.error("提出エラー:", submissionError);
         console.error("提出しようとしたデータ:", {
-          submission_content: submissionContent,
+          submission_content: submissionData,
           grade: finalGrade,
         });
         throw new Error(
@@ -936,7 +1132,7 @@ export default function AssignmentDetailsClient({
           course_title: course.title,
           assignment_id: assignmentId,
           assignment_title: assignment.title,
-          submission_id: submissionData.id,
+          submission_id: submission.id,
         }
       );
 
@@ -952,7 +1148,7 @@ export default function AssignmentDetailsClient({
             assignment_id: assignmentId,
             assignment_title: assignment.title,
             grade: finalGrade,
-            submission_id: submissionData.id,
+            submission_id: submission.id,
           }
         );
       }
@@ -1126,6 +1322,7 @@ export default function AssignmentDetailsClient({
                 testOutput={testOutput}
                 handleTestRun={handleTestRun}
                 isRunning={isRunning}
+                submissionContent={submissionContent}
               />
 
               {!submitted ? (
