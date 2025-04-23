@@ -4,6 +4,9 @@ import { getAssignmentsByCourseId } from "@/app/lib/assignments";
 import { getCourseById } from "@/app/lib/courses";
 import { getMaterials } from "@/app/lib/materials";
 import { notFound } from "next/navigation";
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
+import { Database } from "@/lib/database.types";
 
 export default async function CoursePage({
   params,
@@ -11,13 +14,57 @@ export default async function CoursePage({
   params: Promise<{ id: string }>;
 }) {
   const { id: courseId } = await params;
+  const supabase = createServerComponentClient<Database>({ cookies });
 
   try {
-    // コース情報を取得
-    const course = await getCourseById(courseId);
+    // ユーザー情報を取得
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return notFound();
+    }
 
-    // 課題を取得
-    const courseAssignments = await getAssignmentsByCourseId(courseId);
+    // コース情報を取得（講師の情報も含める）
+    const { data: courseData, error: courseError } = await supabase
+      .from("courses")
+      .select(
+        `
+        *,
+        users!courses_teacher_id_fkey (
+          first_name,
+          last_name
+        )
+      `
+      )
+      .eq("id", courseId)
+      .single();
+
+    if (courseError) {
+      console.error("コースの取得に失敗しました:", courseError);
+      return null;
+    }
+
+    if (!courseData) {
+      return notFound();
+    }
+
+    const course = {
+      ...courseData,
+      teacher_name: `${courseData.users.first_name} ${courseData.users.last_name}`,
+    };
+
+    // 課題を取得（提出状況も含める）
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("course_id", courseId)
+      .order("due_date", { ascending: true });
+
+    if (assignmentsError) {
+      console.error("課題の取得に失敗しました:", assignmentsError);
+      return null;
+    }
 
     // 教材を取得
     const courseMaterials = await getMaterials(courseId);
@@ -26,6 +73,25 @@ export default async function CoursePage({
       return notFound();
     }
 
+    // 各課題の提出状況を確認
+    const assignmentsWithStatus = assignments.map((assignment) => {
+      const latestSubmission = assignment.submissions
+        ?.filter((s: any) => s.student_id === user.id)
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.submitted_at).getTime() -
+            new Date(a.submitted_at).getTime()
+        )[0];
+
+      return {
+        ...assignment,
+        submission_status: latestSubmission
+          ? latestSubmission.status
+          : "not_submitted",
+        score: latestSubmission?.score,
+      };
+    });
+
     return (
       <div className="container mx-auto py-6 px-4">
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -33,7 +99,7 @@ export default async function CoursePage({
           <p className="text-gray-600 mb-4">{course.description}</p>
           <div className="flex flex-wrap gap-4">
             <span className="text-sm text-gray-500">
-              講師ID: {course.teacher_id}
+              講師: {course.teacher_name}
             </span>
             <span className="text-sm text-gray-500">
               作成日: {new Date(course.created_at).toLocaleDateString()}
@@ -54,16 +120,34 @@ export default async function CoursePage({
               </Link>
             </div>
 
-            {courseAssignments.length > 0 ? (
+            {assignmentsWithStatus.length > 0 ? (
               <div className="space-y-4">
-                {courseAssignments.map((assignment) => (
+                {assignmentsWithStatus.map((assignment) => (
                   <Link
                     key={assignment.id}
                     href={`/courses/${courseId}/assignments/${assignment.id}`}
-                    className="block p-4 border rounded-md hover:bg-gray-50"
+                    className="block p-4 border rounded-md hover:bg-gray-50 relative"
                   >
-                    <h3 className="font-medium">{assignment.title}</h3>
-                    <p className="text-sm text-gray-500 line-clamp-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-medium pr-20">{assignment.title}</h3>
+                      {/* 提出状況バッジ */}
+                      <div
+                        className={`absolute top-4 right-4 px-2 py-1 rounded text-sm ${
+                          assignment.submission_status === "graded"
+                            ? "bg-green-100 text-green-800"
+                            : assignment.submission_status === "submitted"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
+                        }`}
+                      >
+                        {assignment.submission_status === "graded"
+                          ? `採点済み (${assignment.score}/${assignment.points_possible}点)`
+                          : assignment.submission_status === "submitted"
+                          ? "提出済み"
+                          : "未提出"}
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-500 line-clamp-1 mb-2">
                       {assignment.description}
                     </p>
                     <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -149,7 +233,7 @@ export default async function CoursePage({
       </div>
     );
   } catch (error) {
-    console.error("Error loading course:", error);
-    return notFound();
+    console.error("Error:", error);
+    return <div>エラーが発生しました。</div>;
   }
 }
