@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="600" viewBox="0 0 900 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景の装飾 -->
+  <path d="M450 550C650 550 800 400 800 200C800 0 650 -150 450 -150C250 -150 100 0 100 200C100 400 250 550 450 550Z" fill="rgba(255, 255, 255, 0.1)"/>
+  
+  <!-- ノートPCの外枠 -->
+  <rect x="300" y="200" width="300" height="200" rx="10" fill="#2D3748"/>
+  <rect x="250" y="400" width="400" height="20" rx="5" fill="#2D3748"/>
+  
+  <!-- 画面 -->
+  <rect x="320" y="220" width="260" height="160" fill="#1A202C"/>
+  
+  <!-- コードのイメージ -->
+  <rect x="340" y="240" width="120" height="10" rx="2" fill="#805AD5"/>
+  <rect x="340" y="260" width="180" height="10" rx="2" fill="#4299E1"/>
+  <rect x="340" y="280" width="140" height="10" rx="2" fill="#48BB78"/>
+  <rect x="340" y="300" width="160" height="10" rx="2" fill="#F6AD55"/>
+  <rect x="340" y="320" width="100" height="10" rx="2" fill="#F687B3"/>
+  
+  <!-- 装飾的な要素 -->
+  <circle cx="700" cy="150" r="50" fill="rgba(255, 255, 255, 0.1)"/>
+  <circle cx="200" cy="400" r="30" fill="rgba(255, 255, 255, 0.1)"/>
+  <circle cx="750" cy="350" r="20" fill="rgba(255, 255, 255, 0.1)"/>
+</svg> 
