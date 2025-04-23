@@ -478,19 +478,36 @@ const canSubmit = (
 
 // 選択問題の採点を行う関数
 const calculateMultipleChoiceGrade = (
-  selectedAnswers: string[],
-  correctAnswers: string[],
+  selectedAnswers: Record<string, string>,
+  questions: any[],
   totalPoints: number
 ): number => {
-  const correctCount = selectedAnswers.filter((answer) =>
-    correctAnswers.includes(answer)
-  ).length;
-  const totalQuestions = correctAnswers.length;
-  return Math.round((correctCount / totalQuestions) * totalPoints);
+  console.log("選択された回答:", selectedAnswers);
+  console.log("問題データ:", questions);
+  console.log("配点:", totalPoints);
+
+  let correctCount = 0;
+  questions.forEach((question) => {
+    const selectedOptionId = selectedAnswers[question.id];
+    const correctOption = question.options.find((opt: any) => opt.isCorrect);
+    if (correctOption && selectedOptionId === correctOption.id) {
+      correctCount++;
+    }
+  });
+
+  const pointsPerQuestion = totalPoints / questions.length;
+  const grade = Math.round(correctCount * pointsPerQuestion);
+
+  console.log("正解数:", correctCount);
+  console.log("問題数:", questions.length);
+  console.log("1問あたりの配点:", pointsPerQuestion);
+  console.log("計算された得点:", grade);
+
+  return grade;
 };
 
 interface SubmissionContent {
-  selected_answers?: string[];
+  selected_answers?: Record<string, string>;
   code?: string;
   text?: string;
   file_url?: string;
@@ -654,17 +671,13 @@ export default function AssignmentDetailsClient({
         setAssignment(assignmentData);
         setCourse(assignmentData.courses);
 
-        // コーディング課題の場合、初期テンプレートを設定
-        if (assignmentData.problem_type === "code") {
-          setCodeSubmission(languageTemplates[selectedLanguage] || "");
-        }
-
         // 既存の提出物があるか確認
         const { data: submissionData, error: submissionError } = await supabase
           .from("submissions")
           .select("*")
           .eq("assignment_id", assignmentId)
-          .eq("student_id", user.id)
+          .eq("student_id", userData.id)
+          .order("submitted_at", { ascending: false })
           .single();
 
         if (submissionError && submissionError.code !== "PGRST116") {
@@ -674,28 +687,31 @@ export default function AssignmentDetailsClient({
         if (submissionData) {
           setSubmitted(true);
           setCurrentGrade(submissionData.grade);
+          setSubmissionCount(submissionData.submission_number);
+
           if (submissionData.submission_content) {
             if (assignmentData.problem_type === "multiple_choice") {
-              setSelectedAnswers(
-                submissionData.submission_content.selected_answers || {}
-              );
+              // 保存された回答を復元
+              const savedAnswers =
+                submissionData.submission_content.selected_answers || {};
+              console.log("保存された回答を復元:", savedAnswers);
+              setSelectedAnswers(savedAnswers);
             } else if (assignmentData.problem_type === "code") {
               const code = submissionData.submission_content.code;
               const language =
                 submissionData.submission_content.language || "python";
-              setCodeSubmission(code || languageTemplates[language] || "");
+              setCodeSubmission(code || languageTemplates[language]);
               setSelectedLanguage(language);
             } else {
               setSubmissionText(submissionData.submission_content.text || "");
             }
           }
-        } else if (assignmentData.problem_type === "code") {
-          // 提出がない場合は選択された言語のテンプレートを設定
-          setCodeSubmission(languageTemplates[selectedLanguage] || "");
+        } else {
+          setSubmissionCount(0);
+          if (assignmentData.problem_type === "code") {
+            setCodeSubmission(languageTemplates[selectedLanguage]);
+          }
         }
-
-        // 提出回数を取得
-        await getSubmissionCount(assignmentId, user.id, supabase);
       } catch (error) {
         console.error("データ取得エラー:", error);
         toast.error("データの読み込みに失敗しました");
@@ -757,6 +773,7 @@ export default function AssignmentDetailsClient({
       }
 
       let submissionContent: SubmissionContent = {};
+      let finalGrade = null;
       switch (assignment.problem_type) {
         case "multiple_choice":
           if (Object.keys(selectedAnswers).length === 0) {
@@ -774,9 +791,23 @@ export default function AssignmentDetailsClient({
             );
             throw new Error("すべての問題に回答してください");
           }
+
+          // 選択された回答をオブジェクトとして保存
           submissionContent = {
-            selected_answers: Object.values(selectedAnswers),
+            selected_answers: selectedAnswers, // {questionId: selectedOptionId}の形式で保存
           };
+
+          console.log("保存する回答データ:", submissionContent);
+
+          // 自動採点
+          if (assignment.content.questions) {
+            finalGrade = calculateMultipleChoiceGrade(
+              selectedAnswers,
+              assignment.content.questions,
+              assignment.points_possible
+            );
+            console.log("計算された最終得点:", finalGrade);
+          }
           break;
         case "code":
           const trimmedCode = codeSubmission.trim();
@@ -871,8 +902,8 @@ export default function AssignmentDetailsClient({
             submission_content: submissionContent,
             submitted_at: new Date().toISOString(),
             submission_number: submissionCount + 1,
-            grade: null,
-            graded_at: null,
+            grade: finalGrade,
+            graded_at: finalGrade !== null ? new Date().toISOString() : null,
             graded_by: null,
             feedback: null,
           },
@@ -885,7 +916,11 @@ export default function AssignmentDetailsClient({
         .single();
 
       if (submissionError) {
-        showErrorToast(submissionError.message || "提出に失敗しました");
+        console.error("提出エラー:", submissionError);
+        console.error("提出しようとしたデータ:", {
+          submission_content: submissionContent,
+          grade: finalGrade,
+        });
         throw new Error(
           `提出に失敗しました: ${submissionError.message || "不明なエラー"}`
         );
@@ -905,32 +940,8 @@ export default function AssignmentDetailsClient({
         }
       );
 
-      // 自動採点（多肢選択問題の場合）
-      let finalGrade = null;
-      if (
-        assignment.problem_type === "multiple_choice" &&
-        assignment.content?.correct_answers
-      ) {
-        finalGrade = calculateMultipleChoiceGrade(
-          Object.values(selectedAnswers),
-          assignment.content.correct_answers as string[],
-          assignment.points_possible
-        );
-
-        const { error: gradingError } = await supabase
-          .from("submissions")
-          .update({
-            grade: finalGrade,
-            graded_at: new Date().toISOString(),
-            graded_by: "system",
-          })
-          .eq("id", submissionData.id);
-
-        if (gradingError) {
-          console.error("自動採点の保存に失敗しました:", gradingError);
-        }
-
-        // 採点結果のアクティビティを記録
+      // 採点結果のアクティビティを記録
+      if (finalGrade !== null) {
         await recordActivity(
           supabase as SupabaseClient,
           currentUser.id,
@@ -948,6 +959,10 @@ export default function AssignmentDetailsClient({
 
       setSubmitting(false);
       setSubmitted(true);
+      setSubmissionCount(submissionCount + 1);
+      if (finalGrade !== null) {
+        setCurrentGrade(finalGrade);
+      }
       showSuccessToast(finalGrade);
       router.refresh();
     } catch (error: any) {
