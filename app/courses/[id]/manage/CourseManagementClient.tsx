@@ -29,7 +29,7 @@ export default function CourseManagementClient({ id }: { id: string }) {
         const currentUser = await getCurrentUser();
 
         if (!currentUser) {
-          router.push("/auth/login");
+          router.push("/auth?registered=true");
           return;
         }
 

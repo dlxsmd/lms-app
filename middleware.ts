@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
     }
 
     // サインアップページへのアクセスは常に許可
-    if (request.nextUrl.pathname === "/auth/signup") {
+    if (request.nextUrl.pathname === "/auth?registered=false") {
       return res;
     }
 
@@ -37,14 +37,14 @@ export async function middleware(request: NextRequest) {
         "⚠️ Middleware: Unauthorized access to dashboard, redirecting to login"
       );
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/auth/login";
+      redirectUrl.pathname = "/auth?registered=true";
       redirectUrl.searchParams.set("redirect", request.nextUrl.pathname);
 
       return NextResponse.redirect(redirectUrl);
     }
 
     // ログイン済みユーザーがログインページにアクセスした場合
-    if (session && request.nextUrl.pathname === "/auth/login") {
+    if (session && request.nextUrl.pathname === "/auth?registered=true") {
       console.log(
         "ℹ️ Middleware: Logged-in user accessing auth pages, redirecting to dashboard"
       );
@@ -58,12 +58,12 @@ export async function middleware(request: NextRequest) {
   } catch (error) {
     console.error("❌ Middleware: Unexpected error:", error);
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/auth/login";
+    redirectUrl.pathname = "/auth?registered=true";
     return NextResponse.redirect(redirectUrl);
   }
 }
 
 // ミドルウェアを適用するパスを指定
 export const config = {
-  matcher: ["/dashboard/:path*", "/auth/login", "/auth/signup"],
+  matcher: ["/dashboard/:path*", "/auth"],
 };

@@ -19,7 +19,7 @@ export default function CreateCourse() {
         const currentUser = await getCurrentUser();
 
         if (!currentUser) {
-          router.push("/auth/login");
+          router.push("/auth?registered=true");
           return;
         }
 

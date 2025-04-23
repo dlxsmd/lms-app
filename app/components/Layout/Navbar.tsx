@@ -49,7 +49,7 @@ export default function Navbar() {
         setUser(userData);
       } else if (event === "SIGNED_OUT") {
         setUser(null);
-        router.push("/auth/login");
+        router.push("/auth?registered=true");
       }
     });
 
@@ -68,7 +68,7 @@ export default function Navbar() {
     try {
       await supabase.auth.signOut();
       setUser(null);
-      router.push("/auth/login");
+      router.push("/auth?registered=true");
     } catch (error) {
       console.error("ログアウトに失敗しました:", error);
     }
@@ -387,7 +387,7 @@ export default function Navbar() {
               ) : (
                 <div className="flex space-x-4">
                   <Link
-                    href="/auth/login"
+                    href="/auth?registered=true"
                     className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
                       scrolled
                         ? "text-indigo-600 hover:bg-indigo-50"
@@ -397,7 +397,7 @@ export default function Navbar() {
                     ログイン
                   </Link>
                   <Link
-                    href="/auth/signup"
+                    href="/auth"
                     className={`px-4 py-2 rounded-md text-sm font-medium shadow-sm transition-all duration-200 ${
                       scrolled
                         ? "bg-indigo-600 text-white hover:bg-indigo-700"
