@@ -9,15 +9,29 @@ interface EnrolledCourse {
   course: Course;
 }
 
-interface AssignmentWithCourse extends Assignment {
+interface Submission {
+  id: string;
+  student_id: string;
+}
+
+interface AssignmentWithSubmissions extends Assignment {
+  submissions: Submission[] | null;
+  courses: {
+    id: string;
+    title: string;
+  };
+}
+
+interface AssignmentDisplay extends Assignment {
   course: {
+    id: string;
     title: string;
   };
 }
 
 export default function DashboardPage() {
   const [courses, setCourses] = useState<Course[]>([]);
-  const [assignments, setAssignments] = useState<AssignmentWithCourse[]>([]);
+  const [assignments, setAssignments] = useState<AssignmentDisplay[]>([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClientComponentClient();
 
@@ -80,33 +94,51 @@ export default function DashboardPage() {
               courses!inner(
                 id,
                 title
+              ),
+              submissions!left(
+                id,
+                student_id
               )
             `
             )
             .gte("due_date", today.toISOString())
             .lte("due_date", nextWeek.toISOString())
-            .order("due_date", { ascending: true })
-            .limit(5);
+            .order("due_date", { ascending: true });
 
         if (assignmentsError) {
           console.error(
-            "❌ Dashboard: Assignment fetch error:",
+            "❌ Dashboard: Assignments fetch error:",
             assignmentsError
           );
           throw assignmentsError;
         }
 
+        // 未提出の課題のみをフィルタリング
         const assignments =
-          upcomingAssignmentsData?.map((assignment) => ({
-            ...assignment,
-            course: {
-              id: assignment.courses.id,
-              title: assignment.courses.title,
-            },
-          })) || [];
+          upcomingAssignmentsData
+            ?.filter(
+              (assignment: AssignmentWithSubmissions) =>
+                !assignment.submissions?.some(
+                  (submission: Submission) => submission.student_id === user.id
+                )
+            )
+            .map(
+              (assignment: AssignmentWithSubmissions): AssignmentDisplay => ({
+                ...assignment,
+                course: {
+                  id: assignment.courses.id,
+                  title: assignment.courses.title,
+                },
+              })
+            ) || [];
+
+        console.log(
+          "📊 Dashboard: Found unsubmitted assignments:",
+          assignments.length
+        );
 
         setCourses(courses);
-        setAssignments(assignments as AssignmentWithCourse[]);
+        setAssignments(assignments);
       } catch (error) {
         console.error("❌ Dashboard: Error fetching dashboard data:", error);
       } finally {
