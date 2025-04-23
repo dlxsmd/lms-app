@@ -4,8 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Assignment, ProblemType } from "@/app/types";
+import { Assignment, ProblemType, Course, User } from "@/app/types";
 import CodeEditor, { languageTemplates } from "./CodeEditor";
+import { toast, Toast, Toaster } from "react-hot-toast";
+import { recordActivity } from "@/app/lib/activity";
+import { SupabaseClient } from "@supabase/supabase-js";
+import { CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
 
 // 日付フォーマット用のヘルパー関数
 const formatDate = (dateString: string | null | undefined) => {
@@ -474,25 +478,97 @@ const canSubmit = (
 
 // 選択問題の採点を行う関数
 const calculateMultipleChoiceGrade = (
-  questions: any[],
-  selectedAnswers: Record<string, string>,
+  selectedAnswers: string[],
+  correctAnswers: string[],
   totalPoints: number
 ): number => {
-  const correctAnswers = questions.reduce((count, question) => {
-    const selectedOption = question.options.find(
-      (opt: any) => opt.id === selectedAnswers[question.id]
-    );
-    return count + (selectedOption?.isCorrect ? 1 : 0);
-  }, 0);
-
-  const pointsPerQuestion = totalPoints / questions.length;
-  return Math.round(correctAnswers * pointsPerQuestion);
+  const correctCount = selectedAnswers.filter((answer) =>
+    correctAnswers.includes(answer)
+  ).length;
+  const totalQuestions = correctAnswers.length;
+  return Math.round((correctCount / totalQuestions) * totalPoints);
 };
+
+interface SubmissionContent {
+  selected_answers?: string[];
+  code?: string;
+  text?: string;
+  file_url?: string;
+  language?: string;
+}
 
 interface AssignmentDetailsClientProps {
   id: string;
   assignmentId: string;
 }
+
+// カスタム成功通知コンポーネント
+const SuccessToast = ({ t, message }: { t: Toast; message: string }) => {
+  return (
+    <div
+      className={`${
+        t.visible
+          ? "animate-[slideIn_0.3s_ease-out]"
+          : "animate-[slideOut_0.3s_ease-in]"
+      } max-w-md w-full bg-white shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5`}
+    >
+      <div className="flex-1 w-0 p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0 pt-0.5">
+            <CheckCircleIcon className="h-10 w-10 text-green-500 animate-bounce" />
+          </div>
+          <div className="ml-3 flex-1">
+            <p className="text-sm font-medium text-gray-900">提出完了！</p>
+            <p className="mt-1 text-sm text-gray-500">{message}</p>
+          </div>
+        </div>
+      </div>
+      <div className="flex border-l border-gray-200">
+        <button
+          onClick={() => toast.dismiss(t.id)}
+          className="w-full border border-transparent rounded-none rounded-r-lg p-4 flex items-center justify-center text-sm font-medium text-indigo-600 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          閉じる
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// カスタムエラー通知コンポーネント
+const ErrorToast = ({ t, message }: { t: Toast; message: string }) => {
+  return (
+    <div
+      className={`${
+        t.visible
+          ? "animate-[slideIn_0.3s_ease-out]"
+          : "animate-[slideOut_0.3s_ease-in]"
+      } max-w-md w-full bg-white shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5`}
+    >
+      <div className="flex-1 w-0 p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0 pt-0.5">
+            <XCircleIcon className="h-10 w-10 text-red-500 animate-pulse" />
+          </div>
+          <div className="ml-3 flex-1">
+            <p className="text-sm font-medium text-gray-900">
+              エラーが発生しました
+            </p>
+            <p className="mt-1 text-sm text-gray-500">{message}</p>
+          </div>
+        </div>
+      </div>
+      <div className="flex border-l border-gray-200">
+        <button
+          onClick={() => toast.dismiss(t.id)}
+          className="w-full border border-transparent rounded-none rounded-r-lg p-4 flex items-center justify-center text-sm font-medium text-red-600 hover:text-red-500 focus:outline-none focus:ring-2 focus:ring-red-500"
+        >
+          閉じる
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function AssignmentDetailsClient({
   id,
@@ -506,7 +582,8 @@ export default function AssignmentDetailsClient({
   >({});
   const [file, setFile] = useState<File | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [codeSubmission, setCodeSubmission] = useState("");
   const [selectedLanguage, setSelectedLanguage] = useState("python");
   const supabase = createClientComponentClient();
@@ -516,25 +593,15 @@ export default function AssignmentDetailsClient({
   const [isRunning, setIsRunning] = useState(false);
   const [submissionCount, setSubmissionCount] = useState<number>(0);
   const [currentGrade, setCurrentGrade] = useState<number | null>(null);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleAnswerSelect = (questionId: string, optionId: string) => {
-    setSelectedAnswers((prev) => ({
-      ...prev,
-      [questionId]: optionId,
-    }));
-  };
-
-  // 提出回数を更新する関数
-  const updateSubmissionCount = useCallback(async () => {
-    if (currentUser) {
-      const count = await getSubmissionCount(
-        assignmentId,
-        currentUser.id,
-        supabase
-      );
-      setSubmissionCount(count);
+  // 言語が変更されたときのテンプレートコードの設定
+  useEffect(() => {
+    if (assignment?.problem_type === "code" && !submitted) {
+      setCodeSubmission(languageTemplates[selectedLanguage] || "");
     }
-  }, [assignmentId, currentUser, supabase]);
+  }, [selectedLanguage, assignment, submitted]);
 
   useEffect(() => {
     async function loadData() {
@@ -546,7 +613,19 @@ export default function AssignmentDetailsClient({
           error: userError,
         } = await supabase.auth.getUser();
         if (userError) throw userError;
-        setCurrentUser(user);
+        if (!user) throw new Error("ユーザーが見つかりません");
+
+        // ユーザーの詳細情報を取得
+        const { data: userData, error: userDataError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+
+        if (userDataError) throw userDataError;
+        if (!userData) throw new Error("ユーザー情報が見つかりません");
+
+        setCurrentUser(userData);
 
         // 課題データの取得
         const { data: assignmentData, error: assignmentError } = await supabase
@@ -556,7 +635,13 @@ export default function AssignmentDetailsClient({
             *,
             courses (
               id,
-              title
+              title,
+              description,
+              teacher_id,
+              cover_image_url,
+              is_active,
+              created_at,
+              updated_at
             )
           `
           )
@@ -564,47 +649,56 @@ export default function AssignmentDetailsClient({
           .single();
 
         if (assignmentError) throw assignmentError;
-        if (assignmentData) {
-          setAssignment(assignmentData);
+        if (!assignmentData) throw new Error("課題が見つかりません");
 
-          // 既存の提出物があるか確認
-          if (user) {
-            const { data: submissionData } = await supabase
-              .from("submissions")
-              .select("*")
-              .eq("assignment_id", assignmentId)
-              .eq("student_id", user.id)
-              .single();
+        setAssignment(assignmentData);
+        setCourse(assignmentData.courses);
 
-            if (submissionData) {
-              setSubmitted(true);
-              setCurrentGrade(submissionData.grade);
-              if (submissionData.submission_content) {
-                if (assignmentData.problem_type === "multiple_choice") {
-                  setSelectedAnswers(
-                    submissionData.submission_content.answers || {}
-                  );
-                } else if (assignmentData.problem_type === "code") {
-                  setCodeSubmission(
-                    submissionData.submission_content.code || ""
-                  );
-                  setSelectedLanguage(
-                    submissionData.submission_content.language || "python"
-                  );
-                } else {
-                  setSubmissionText(
-                    submissionData.submission_content.text || ""
-                  );
-                }
-              }
-            }
-
-            // 提出回数を取得
-            await updateSubmissionCount();
-          }
+        // コーディング課題の場合、初期テンプレートを設定
+        if (assignmentData.problem_type === "code") {
+          setCodeSubmission(languageTemplates[selectedLanguage] || "");
         }
+
+        // 既存の提出物があるか確認
+        const { data: submissionData, error: submissionError } = await supabase
+          .from("submissions")
+          .select("*")
+          .eq("assignment_id", assignmentId)
+          .eq("student_id", user.id)
+          .single();
+
+        if (submissionError && submissionError.code !== "PGRST116") {
+          throw submissionError;
+        }
+
+        if (submissionData) {
+          setSubmitted(true);
+          setCurrentGrade(submissionData.grade);
+          if (submissionData.submission_content) {
+            if (assignmentData.problem_type === "multiple_choice") {
+              setSelectedAnswers(
+                submissionData.submission_content.selected_answers || {}
+              );
+            } else if (assignmentData.problem_type === "code") {
+              const code = submissionData.submission_content.code;
+              const language =
+                submissionData.submission_content.language || "python";
+              setCodeSubmission(code || languageTemplates[language] || "");
+              setSelectedLanguage(language);
+            } else {
+              setSubmissionText(submissionData.submission_content.text || "");
+            }
+          }
+        } else if (assignmentData.problem_type === "code") {
+          // 提出がない場合は選択された言語のテンプレートを設定
+          setCodeSubmission(languageTemplates[selectedLanguage] || "");
+        }
+
+        // 提出回数を取得
+        await getSubmissionCount(assignmentId, user.id, supabase);
       } catch (error) {
         console.error("データ取得エラー:", error);
+        toast.error("データの読み込みに失敗しました");
       } finally {
         setLoading(false);
       }
@@ -613,129 +707,255 @@ export default function AssignmentDetailsClient({
     loadData();
   }, [assignmentId, supabase]);
 
-  // 提出状態が変更されたときに提出回数を更新
-  useEffect(() => {
-    if (submitted) {
-      updateSubmissionCount();
-    }
-  }, [submitted, updateSubmissionCount]);
+  const handleAnswerSelect = (questionId: string, optionId: string) => {
+    setSelectedAnswers((prev) => ({
+      ...prev,
+      [questionId]: optionId,
+    }));
+  };
+
+  const showSuccessToast = (grade: number | null) => {
+    const message =
+      grade !== null
+        ? `得点: ${grade}/${assignment?.points_possible || 0}点`
+        : "採点結果は後ほど通知されます";
+
+    toast.custom(
+      (t) => (
+        <SuccessToast
+          t={t}
+          message={`課題が正常に提出されました！${message}`}
+        />
+      ),
+      {
+        duration: 5000,
+        position: "top-center",
+        id: "success-toast",
+      }
+    );
+  };
+
+  const showErrorToast = (message: string) => {
+    toast.custom((t) => <ErrorToast t={t} message={message} />, {
+      duration: 5000,
+      position: "top-center",
+      id: "error-toast",
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!currentUser || !assignment) {
-      alert("ログインしてください");
-      return;
-    }
-
-    // 提出可能かどうかをチェック
-    const isResubmission = submitted;
-    if (!canSubmit(assignment, submissionCount, isResubmission, currentGrade)) {
-      alert("提出回数の制限に達しています。これ以上提出できません。");
-      return;
-    }
+    setSubmitting(true);
+    setError(null);
 
     try {
-      let submissionContent: any = {};
-      let grade: number | null = null;
-      let isAutoGraded = false;
+      if (!currentUser || !course || !assignment) {
+        setError(
+          "ユーザーまたはコース情報が取得できません。ページを再読み込みしてください。"
+        );
+        throw new Error("ユーザーまたはコース情報が取得できません");
+      }
 
-      // 問題タイプに応じて提出内容を構築
+      let submissionContent: SubmissionContent = {};
       switch (assignment.problem_type) {
         case "multiple_choice":
+          if (Object.keys(selectedAnswers).length === 0) {
+            setError("少なくとも1つの回答を選択してください。");
+            throw new Error("回答を選択してください");
+          }
+          if (
+            Object.keys(selectedAnswers).length <
+            assignment.content.questions.length
+          ) {
+            setError(
+              `すべての問題に回答してください。（${
+                Object.keys(selectedAnswers).length
+              }/${assignment.content.questions.length}問回答済み）`
+            );
+            throw new Error("すべての問題に回答してください");
+          }
           submissionContent = {
-            answers: selectedAnswers,
+            selected_answers: Object.values(selectedAnswers),
           };
-          // 選択問題の場合は自動採点
-          grade = calculateMultipleChoiceGrade(
-            assignment.content.questions,
-            selectedAnswers,
-            assignment.points_possible
-          );
-          isAutoGraded = true;
           break;
         case "code":
+          const trimmedCode = codeSubmission.trim();
+          if (!trimmedCode) {
+            setError("コードが入力されていません。");
+            throw new Error("コードを入力してください");
+          }
+          if (trimmedCode === languageTemplates[selectedLanguage].trim()) {
+            setError(
+              "テンプレートコードをそのまま提出することはできません。コードを編集してください。"
+            );
+            throw new Error("テンプレートコードがそのまま提出されています");
+          }
           submissionContent = {
             code: codeSubmission,
             language: selectedLanguage,
           };
           break;
         case "file_upload":
-          // ファイルのアップロード処理
-          let fileUrl = null;
-          if (file) {
-            const fileExt = file.name.split(".").pop();
-            const fileName = `${assignmentId}/${
-              currentUser.id
-            }/${Date.now()}.${fileExt}`;
-            const { error: uploadError } = await supabase.storage
-              .from("submissions")
-              .upload(fileName, file);
-
-            if (uploadError) throw uploadError;
-            fileUrl = fileName;
+          if (!file) {
+            setError("ファイルが選択されていません。");
+            throw new Error("ファイルを選択してください");
           }
-          submissionContent = { file_url: fileUrl };
+          // ファイル拡張子のチェック
+          const fileExt = file.name.split(".").pop()?.toLowerCase();
+          if (!assignment.content.allowed_extensions.includes(`.${fileExt}`)) {
+            setError(
+              `このファイル形式（.${fileExt}）は許可されていません。許可されている形式: ${assignment.content.allowed_extensions.join(
+                ", "
+              )}`
+            );
+            throw new Error("不正なファイル形式です");
+          }
+          // ファイルのアップロード処理
+          const filePath = `submissions/${assignmentId}/${
+            currentUser.id
+          }/${Date.now()}.${fileExt}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("assignments")
+            .upload(filePath, file);
+
+          if (uploadError) {
+            console.error("ファイルのアップロードに失敗しました:", uploadError);
+            throw new Error("ファイルのアップロードに失敗しました");
+          }
+
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("assignments").getPublicUrl(filePath);
+
+          submissionContent = {
+            file_url: publicUrl,
+          };
+          break;
+        case "short_answer":
+        case "essay":
+          if (!submissionText.trim()) {
+            setError("回答を入力してください。");
+            throw new Error("回答を入力してください");
+          }
+          if (submissionText.trim().length < 10) {
+            setError("回答が短すぎます。もう少し詳しく記述してください。");
+            throw new Error("回答が短すぎます");
+          }
+          submissionContent = {
+            text: submissionText,
+          };
           break;
         default:
-          submissionContent = { text: submissionText };
+          setError("不正な問題タイプです。");
+          throw new Error("不正な問題タイプです");
       }
 
-      // 既存の提出を確認
-      const { data: existingSubmission } = await supabase
+      // 提出回数のチェック
+      if (!canSubmit(assignment, submissionCount, false, currentGrade)) {
+        setError(
+          `これ以上提出できません。（提出回数: ${submissionCount}/${
+            assignment.max_attempts || "∞"
+          }）`
+        );
+        throw new Error("これ以上提出できません");
+      }
+
+      // 提出処理
+      const { data: submissionData, error: submissionError } = await supabase
         .from("submissions")
-        .select("id")
-        .eq("assignment_id", assignmentId)
-        .eq("student_id", currentUser.id)
-        .single();
-
-      // 新しい提出回数を取得
-      const newSubmissionNumber = submissionCount + 1;
-
-      const submissionData = {
-        submission_content: submissionContent,
-        submitted_at: new Date().toISOString(),
-        grade: grade,
-        feedback: null,
-        graded_by: null, // 自動採点でもnullを設定
-        graded_at: isAutoGraded ? new Date().toISOString() : null,
-        submission_number: newSubmissionNumber,
-      };
-
-      if (existingSubmission) {
-        // 既存の提出を更新
-        const { error: updateError } = await supabase
-          .from("submissions")
-          .update(submissionData)
-          .eq("id", existingSubmission.id);
-
-        if (updateError) throw updateError;
-      } else {
-        // 新規提出
-        const { error: insertError } = await supabase
-          .from("submissions")
-          .insert({
-            ...submissionData,
+        .upsert(
+          {
             assignment_id: assignmentId,
             student_id: currentUser.id,
-          });
+            submission_content: submissionContent,
+            submitted_at: new Date().toISOString(),
+            submission_number: submissionCount + 1,
+            grade: null,
+            graded_at: null,
+            graded_by: null,
+            feedback: null,
+          },
+          {
+            onConflict: "assignment_id,student_id",
+            ignoreDuplicates: false,
+          }
+        )
+        .select()
+        .single();
 
-        if (insertError) throw insertError;
+      if (submissionError) {
+        showErrorToast(submissionError.message || "提出に失敗しました");
+        throw new Error(
+          `提出に失敗しました: ${submissionError.message || "不明なエラー"}`
+        );
       }
 
+      // アクティビティの記録
+      await recordActivity(
+        supabase as SupabaseClient,
+        currentUser.id,
+        "submission",
+        {
+          course_id: course.id,
+          course_title: course.title,
+          assignment_id: assignmentId,
+          assignment_title: assignment.title,
+          submission_id: submissionData.id,
+        }
+      );
+
+      // 自動採点（多肢選択問題の場合）
+      let finalGrade = null;
+      if (
+        assignment.problem_type === "multiple_choice" &&
+        assignment.content?.correct_answers
+      ) {
+        finalGrade = calculateMultipleChoiceGrade(
+          Object.values(selectedAnswers),
+          assignment.content.correct_answers as string[],
+          assignment.points_possible
+        );
+
+        const { error: gradingError } = await supabase
+          .from("submissions")
+          .update({
+            grade: finalGrade,
+            graded_at: new Date().toISOString(),
+            graded_by: "system",
+          })
+          .eq("id", submissionData.id);
+
+        if (gradingError) {
+          console.error("自動採点の保存に失敗しました:", gradingError);
+        }
+
+        // 採点結果のアクティビティを記録
+        await recordActivity(
+          supabase as SupabaseClient,
+          currentUser.id,
+          "grade_received",
+          {
+            course_id: course.id,
+            course_title: course.title,
+            assignment_id: assignmentId,
+            assignment_title: assignment.title,
+            grade: finalGrade,
+            submission_id: submissionData.id,
+          }
+        );
+      }
+
+      setSubmitting(false);
       setSubmitted(true);
-      setSubmissionCount(newSubmissionNumber);
-      setCurrentGrade(grade);
-      alert(
-        isAutoGraded
-          ? `課題が提出され、自動採点されました！\n得点: ${grade}/${assignment.points_possible}点`
-          : "課題が提出されました！\n教員による採点をお待ちください。"
-      );
+      showSuccessToast(finalGrade);
+      router.refresh();
     } catch (error: any) {
-      console.error("提出エラー:", error);
-      alert(
-        `課題の提出中にエラーが発生しました: ${error.message || "不明なエラー"}`
-      );
+      console.error("課題提出中にエラーが発生しました:", error);
+      setSubmitting(false);
+      if (!error.message.includes("これ以上提出できません")) {
+        showErrorToast(error.message || "課題の提出に失敗しました");
+      }
     }
   };
 
@@ -813,6 +1033,16 @@ export default function AssignmentDetailsClient({
 
   return (
     <div className="min-h-screen bg-gray-100">
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          duration: 5000,
+          style: {
+            background: "white",
+            color: "#363636",
+          },
+        }}
+      />
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="mb-6">
           <Link
@@ -885,6 +1115,17 @@ export default function AssignmentDetailsClient({
 
               {!submitted ? (
                 <form onSubmit={handleSubmit} className="mt-6">
+                  {error && (
+                    <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-red-600">{error}</p>
+                      {assignment.problem_type === "multiple_choice" && (
+                        <p className="text-sm text-red-500 mt-2">
+                          未回答の問題があります。すべての問題に回答してください。
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {(assignment.problem_type === "short_answer" ||
                     assignment.problem_type === "essay" ||
                     assignment.problem_type === "code") && (
@@ -924,6 +1165,7 @@ export default function AssignmentDetailsClient({
                   <button
                     type="submit"
                     className={`bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors ${
+                      submitting ||
                       !canSubmit(
                         assignment,
                         submissionCount,
@@ -934,6 +1176,7 @@ export default function AssignmentDetailsClient({
                         : ""
                     }`}
                     disabled={
+                      submitting ||
                       !canSubmit(
                         assignment,
                         submissionCount,
@@ -942,7 +1185,7 @@ export default function AssignmentDetailsClient({
                       )
                     }
                   >
-                    課題を提出
+                    {submitting ? "提出中..." : "課題を提出"}
                   </button>
                 </form>
               ) : (
