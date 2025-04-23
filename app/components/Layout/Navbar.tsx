@@ -127,7 +127,7 @@ export default function Navbar() {
                     </Link>
                     {user.role === "teacher" && (
                       <Link
-                        href="/courses"
+                        href="/courses/manage"
                         className={`px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
                           scrolled
                             ? "hover:bg-indigo-100 hover:text-indigo-600"
@@ -139,7 +139,7 @@ export default function Navbar() {
                     )}
                     {user.role === "student" && (
                       <Link
-                        href="/enrolled"
+                        href="/my-courses"
                         className={`px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
                           scrolled
                             ? "hover:bg-indigo-100 hover:text-indigo-600"
