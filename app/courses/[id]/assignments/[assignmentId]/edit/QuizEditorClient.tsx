@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import Navbar from "../../../../../components/Layout/Navbar";
-import { getAssignmentById } from "../../../../../lib/assignments";
+import Navbar from "@/components/Layout/Navbar";
+import { getAssignmentById } from "@/lib/assignments";
 import {
   createQuizQuestion,
   getQuizQuestionsByAssignmentId,
   deleteQuizQuestion,
-} from "../../../../../lib/quizzes";
-import { getCurrentUser } from "../../../../../lib/auth";
+} from "@/lib/quizzes";
+import { getCurrentUser } from "@/lib/auth";
 
 interface QuizEditorClientProps {
   params: {

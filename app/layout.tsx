@@ -2,7 +2,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
-import Navbar from "./components/Layout/Navbar";
+import Navbar from "@/components/Layout/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
 

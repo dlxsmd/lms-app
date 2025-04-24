@@ -14,7 +14,7 @@ import {
   FaGoogle,
 } from "react-icons/fa";
 import { motion, AnimatePresence } from "framer-motion";
-import { signUp } from "../lib/auth";
+import { signUp } from "@/lib/auth";
 import { toast } from "react-hot-toast";
 
 export default function AuthPage() {
