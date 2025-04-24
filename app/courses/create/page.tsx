@@ -3,10 +3,10 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getCurrentUser } from "../../lib/auth";
-import Navbar from "../../components/Layout/Navbar";
-import CourseForm from "../../components/Course/CourseForm";
-import { User, Course } from "../../types";
+import { getCurrentUser } from "@/lib/auth";
+import Navbar from "@/components/Layout/Navbar";
+import CourseForm from "@/components/Course/CourseForm";
+import { User, Course } from "@/types";
 
 export default function CreateCourse() {
   const [user, setUser] = useState<User | null>(null);

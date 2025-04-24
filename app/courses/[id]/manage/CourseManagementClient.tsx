@@ -3,14 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getCurrentUser } from "../../../lib/auth";
-import { getCourseById } from "../../../lib/courses";
-import { getAssignments, deleteAssignment } from "../../../lib/assignments";
-import { getMaterials, deleteMaterial } from "../../../lib/materials";
-import { getEnrolledStudents } from "../../../lib/courses";
-import Navbar from "../../../components/Layout/Navbar";
-import AssignmentCard from "../../../components/Assignment/AssignmentCard";
-import { User, Course, Assignment, Material } from "../../../types";
+import { getCurrentUser } from "@/lib/auth";
+import { getCourseById } from "@/lib/courses";
+import { getAssignments, deleteAssignment } from "@/lib/assignments";
+import { getMaterials, deleteMaterial } from "@/lib/materials";
+import { getEnrolledStudents } from "@/lib/courses";
+import Navbar from "@/components/Layout/Navbar";
+import AssignmentCard from "@/components/Assignment/AssignmentCard";
+import { User, Course, Assignment, Material } from "@/types";
 
 export default function CourseManagementClient({ id }: { id: string }) {
   const [user, setUser] = useState<User | null>(null);

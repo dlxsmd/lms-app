@@ -1,12 +1,12 @@
 "use client";
 
-import { Activity } from "@/app/types";
+import { Activity } from "@/types";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import Link from "next/link";
-import { ActivityType, ActivityContent } from "@/app/lib/activity";
+import { ActivityType, ActivityContent } from "@/lib/activity";
 
 interface ActivityListProps {
   userId: string;

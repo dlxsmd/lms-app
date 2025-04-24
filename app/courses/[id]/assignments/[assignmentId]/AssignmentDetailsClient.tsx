@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Assignment, ProblemType, Course, User } from "@/app/types";
+import { Assignment, ProblemType, Course, User } from "@/types";
 import CodeEditor, { languageTemplates } from "./CodeEditor";
 import { toast, Toast, Toaster } from "react-hot-toast";
-import { recordActivity } from "@/app/lib/activity";
+import { recordActivity } from "@/lib/activity";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
 

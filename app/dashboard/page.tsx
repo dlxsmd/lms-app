@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Course, Assignment } from "@/app/types";
-import ActivityList from "@/app/components/Activity/ActivityList";
+import { Course, Assignment } from "@/types";
+import ActivityList from "@/components/Activity/ActivityList";
 
 interface EnrolledCourse {
   course: Course;

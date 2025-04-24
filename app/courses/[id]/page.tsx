@@ -1,8 +1,8 @@
 import React from "react";
 import Link from "next/link";
-import { getAssignmentsByCourseId } from "@/app/lib/assignments";
-import { getCourseById } from "@/app/lib/courses";
-import { getMaterials } from "@/app/lib/materials";
+import { getAssignmentsByCourseId } from "@/lib/assignments";
+import { getCourseById } from "@/lib/courses";
+import { getMaterials } from "@/lib/materials";
 import { notFound } from "next/navigation";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
