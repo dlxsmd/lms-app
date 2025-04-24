@@ -2,7 +2,7 @@ import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import CourseList from "./CourseList";
-import { Database } from "../../lib/database.types";
+import { Database } from "../../types/database.types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

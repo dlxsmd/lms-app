@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Database } from "@/lib/database.types";
+import { Database } from "@/types/database.types";
 import { toast } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 

@@ -1,6 +1,6 @@
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
-import { Database } from "@/lib/database.types";
+import { Database } from "@/types/database.types";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
