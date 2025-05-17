@@ -2,28 +2,23 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export async function createClient() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name) {
-          return cookieStore.get(name)?.value;
+        getAll() {  // asyncを削除
+          return cookieStore.getAll();  // awaitを削除
         },
-        set(name, value, options) {
+        setAll(cookiesToSet) {  // asyncを削除
           try {
-            cookieStore.set(name, value, options);
-          } catch (error) {
-            // Handle cookie setting errors silently in non-server contexts
-          }
-        },
-        remove(name, options) {
-          try {
-            cookieStore.set(name, "", { ...options, maxAge: 0 });
-          } catch (error) {
-            // Handle cookie removal errors silently in non-server contexts
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // ミドルウェアでセッション更新している場合は無視
           }
         },
       },

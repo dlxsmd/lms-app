@@ -1,8 +1,12 @@
 import React from "react";
 import Link from "next/link";
+import { getAssignmentsByCourseId } from "@/lib/assignments";
+import { getCourseById } from "@/lib/courses";
 import { getMaterials } from "@/lib/materials";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
+import { Database } from "@/types/database.types";
 
 export default async function CoursePage({
   params,
@@ -10,10 +14,9 @@ export default async function CoursePage({
   params: Promise<{ id: string }>;
 }) {
   const { id: courseId } = await params;
-  
-  try {
-    const supabase = await createClient();
+  const supabase = createServerComponentClient<Database>({ cookies });
 
+  try {
     // ユーザー情報を取得
     const {
       data: { user },

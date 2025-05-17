@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 import CourseList from "./CourseList";
 import { Database } from "../../types/database.types";
@@ -28,7 +29,9 @@ interface Enrollment {
 }
 
 export default async function MyCoursesPage() {
-  const supabase = await createClient();
+  const supabase = createServerComponentClient<Database>({
+    cookies,
+  });
 
   const {
     data: { user },
