@@ -14,35 +14,17 @@ export const metadata = {
     "教師がコンテンツを作成・管理し、学生が学習できるプラットフォーム",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createServerComponentClient({ cookies });
-
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    return (
-      <html lang="ja">
-        <body className={inter.className}>
-          <Navbar />
-          <div className="pt-16">{children}</div>
-        </body>
-      </html>
-    );
-  } catch (error) {
-    console.error("Layout error:", error);
-    return (
-      <html lang="ja">
-        <body className={inter.className}>
-          <Navbar />
-          <div className="pt-16">{children}</div>
-        </body>
-      </html>
-    );
-  }
+  return (
+    <html lang="ja">
+      <body className={inter.className}>
+        <Navbar />
+        <div className="pt-16">{children}</div>
+      </body>
+    </html>
+  );
 }
