@@ -1,12 +1,8 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
 import Navbar from "@/components/Layout/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
-
-export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "学習管理システム",
